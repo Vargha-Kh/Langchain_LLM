@@ -36,7 +36,7 @@ class LangchainModel:
 
     def embedding_chunks(self):
         # Split the texts into chunks
-        text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+        text_splitter = CharacterTextSplitter(chunk_size=2000, chunk_overlap=0)
         text_chunks = text_splitter.split_text("\n".join(self.texts))
 
         # Create embeddings for the chunks using OpenAIEmbeddings
