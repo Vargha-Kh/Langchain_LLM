@@ -1,14 +1,15 @@
 import os
+import glob
+import warnings
+import pdfminer.high_level
+import re
 from bs4 import BeautifulSoup
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain.chat_models import ChatOpenAI
-import time
-import glob
 from langchain.vectorstores import Chroma
 from langchain.docstore.document import Document
-import warnings
 
 warnings.filterwarnings("ignore")
 
@@ -19,10 +20,18 @@ os.environ["OPENAI_API_KEY"] = "sk-QsrbizOWOlDAYGpz8xkwT3BlbkFJ4bw4X3ax0k76RIhOg
 class LangchainModel:
     def __init__(self):
         self.chain = None
-        self.texts = []
+        self.docsearch = None
         self.docs = None
+        self.texts = []
 
-    def documents_loader_txt(self, files, mode='files'):
+    # Define function to extract text from PDF using pdfminer
+    def extract_text_from_pdf(self, file_path):
+        text = pdfminer.high_level.extract_text(file_path)
+        # Remove newline and multiple spaces
+        text = re.sub(r'\n|\s{2,}', ' ', text).replace("..", '')
+        return text
+
+    def documents_loader(self, files, mode='files'):
         for file_path in files:
             with open(file_path) as f:
                 if mode == 'html':
@@ -30,39 +39,39 @@ class LangchainModel:
                     soup = BeautifulSoup(html_content, 'html.parser')
                     text = soup.get_text(separator='\n')
                     self.texts.append(text)
+                elif mode == "pdf":
+                    self.texts.append(self.extract_text_from_pdf(file_path))
                 else:
                     text = f.read()
                     self.texts.append(text)
 
     def embedding_chunks(self):
         # Split the texts into chunks
-        text_splitter = CharacterTextSplitter(chunk_size=2000, chunk_overlap=0)
+        text_splitter = CharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
         text_chunks = text_splitter.split_text("\n".join(self.texts))
 
         # Create embeddings for the chunks using OpenAIEmbeddings
         embeddings = OpenAIEmbeddings()
-        docsearch = Chroma.from_texts(text_chunks, embeddings,
-                                      metadatas=[{"source": str(i)} for i in range(len(text_chunks))])
-        self.chain = load_qa_with_sources_chain(ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0),
+        metadata = [{"source": str(i)} for i in range(len(text_chunks))]
+        self.docsearch = Chroma.from_texts(text_chunks, embeddings, metadatas=metadata)
+
+        self.chain = load_qa_with_sources_chain(ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2),
                                                 chain_type="stuff")
-        return docsearch
 
     def query_inferences(self, query_input):
-        docsearch = self.embedding_chunks()
         # Perform similarity search
-        start = time.time()
-        self.docs = docsearch.similarity_search(query_input)
+        self.docs = self.docsearch.similarity_search(query_input)
         results = self.chain({"input_documents": self.docs, "question": query_input}, return_only_outputs=True)
         print(query_input)
         print(results["output_text"].split("\nSOURCES")[0])
-        print(f"Elapsed time: {time.time() - start}")
 
 
 if __name__ == "__main__":
     llm = LangchainModel()
     directory = "liquidmarket_data"  # Replace with the path to your directory
     file_names = glob.glob(directory + "/*")
-    llm.documents_loader_txt(file_names)
+    llm.documents_loader(file_names)
+    llm.embedding_chunks()
     while True:
-        query = input("Please enter your prompt here! ")
+        query = input("Please ask you question! ")
         llm.query_inferences(query)
