@@ -11,7 +11,8 @@ from langchain.chat_models import ChatOpenAI
 from langchain.vectorstores import Chroma
 from langchain.docstore.document import Document
 import telegram
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 
 warnings.filterwarnings("ignore")
 
@@ -19,7 +20,8 @@ warnings.filterwarnings("ignore")
 os.environ["OPENAI_API_KEY"] = "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"
 
 # Set up Telegram bot
-bot = telegram.Bot(token='YOUR_API_TOKEN')
+token = "6035216410:AAEHm0keUv-ULYKUSE9nYiuaPdxZZvVEe-Q"
+bot = telegram.Bot(token=token)
 
 
 class LangchainModel:
@@ -63,12 +65,13 @@ class LangchainModel:
         self.chain = load_qa_with_sources_chain(ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2),
                                                 chain_type="stuff")
 
-    def query_inferences(self, query_input):
+    async def query_inferences(self, query_input, update: Update, context: CallbackContext):
         # Perform similarity search
         self.docs = self.docsearch.similarity_search(query_input)
         results = self.chain({"input_documents": self.docs, "question": query_input}, return_only_outputs=True)
         response = results["output_text"].split("\nSOURCES")[0]
-        return response
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                           text=response)
 
 
 # Define a function to handle incoming messages
@@ -83,10 +86,23 @@ def handle_message(update, context):
     update.message.reply_text(response)
 
 
-# Set up the Telegram bot handler
-updater = Updater(token='YOUR_API_TOKEN', use_context=True)
-dispatcher = updater.dispatcher
-dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
+def run_bot():
+    llm = LangchainModel()
+    directory = "liquidmarket_data"  # Replace with the path to your directory
+    file_names = glob.glob(directory + "/*")
+    llm.documents_loader_txt(file_names)
+    llm.embedding_chunks()
+    while True:
+        application = ApplicationBuilder().token(token).build()
+        que = application.job_queue
+        start_handler = CommandHandler('start', llm.start)
+        input_handler = MessageHandler(filters.Text(), llm.query_inferences)
 
-# Start the bot
-updater.start_polling()
+        application.add_handler(start_handler)
+        application.add_handler(input_handler)
+
+        application.run_polling()
+
+
+if __name__ == "__main__":
+    run_bot()
