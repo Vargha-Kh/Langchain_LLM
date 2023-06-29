@@ -65,26 +65,18 @@ class LangchainModel:
         self.chain = load_qa_with_sources_chain(ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2),
                                                 chain_type="stuff")
 
-    async def query_inferences(self, query_input, update: Update, context: CallbackContext):
+    async def query_inferences(self, update: Update, context: CallbackContext):
         # Perform similarity search
+        query_input = update.message.text
         self.docs = self.docsearch.similarity_search(query_input)
         results = self.chain({"input_documents": self.docs, "question": query_input}, return_only_outputs=True)
         response = results["output_text"].split("\nSOURCES")[0]
         await context.bot.send_message(chat_id=update.effective_chat.id,
                                            text=response)
-
-
-# Define a function to handle incoming messages
-def handle_message(update, context):
-    query = update.message.text
-    llm = LangchainModel()
-    directory = "liquidmarket_data"  # Replace with the path to your directory
-    file_names = glob.glob(directory + "/*")
-    llm.documents_loader_txt(file_names)
-    llm.embedding_chunks()
-    response = llm.query_inferences(query)
-    update.message.reply_text(response)
-
+    
+    async def start(self, update: Update, context: CallbackContext):
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                               text="Ask your question!")
 
 def run_bot():
     llm = LangchainModel()
