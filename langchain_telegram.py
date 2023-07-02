@@ -72,7 +72,7 @@ class LangchainModel:
         results = self.chain({"input_documents": self.docs, "question": query_input}, return_only_outputs=True)
         response = results["output_text"].split("\nSOURCES")[0]
         await context.bot.send_message(chat_id=update.effective_chat.id,
-                                           text=response)
+                                           text=f"Q:{query_input}\n A:{response}")
     
     async def start(self, update: Update, context: CallbackContext):
         await context.bot.send_message(chat_id=update.effective_chat.id,
