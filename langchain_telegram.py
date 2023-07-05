@@ -30,6 +30,7 @@ class LangchainModel:
         self.docsearch = None
         self.docs = None
         self.texts = []
+        self.started_chats = {}
 
     # Define function to extract text from PDF using pdfminer
     def extract_text_from_pdf(self, file_path):
@@ -66,15 +67,20 @@ class LangchainModel:
                                                 chain_type="stuff")
 
     async def query_inferences(self, update: Update, context: CallbackContext):
-        # Perform similarity search
+        if update.effective_chat.id not in self.started_chats:
+            return
+        pattern = re.compile(r'^(who|what|where|when|why|how|which|whose|whom|is|are|was|were|am|do|does|did)\b', re.IGNORECASE)
         query_input = update.message.text
-        self.docs = self.docsearch.similarity_search(query_input)
-        results = self.chain({"input_documents": self.docs, "question": query_input}, return_only_outputs=True)
-        response = results["output_text"].split("\nSOURCES")[0]
-        await context.bot.send_message(chat_id=update.effective_chat.id,
-                                           text=f"Q:{query_input}\n A:{response}")
+        if pattern.match(query_input) or "?" in query_input:
+            # Perform similarity search
+            self.docs = self.docsearch.similarity_search(query_input)
+            results = self.chain({"input_documents": self.docs, "question": query_input}, return_only_outputs=True)
+            response = results["output_text"].split("\nSOURCES")[0]
+            await context.bot.send_message(chat_id=update.effective_chat.id,
+                                           text=f"Q:{query_input}\nA:{response}")
     
     async def start(self, update: Update, context: CallbackContext):
+        self.started_chats[update.effective_chat.id] = True
         await context.bot.send_message(chat_id=update.effective_chat.id,
                                                text="Ask your question!")
 
