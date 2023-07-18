@@ -63,7 +63,7 @@ class LangchainModel:
         metadata = [{"source": str(i)} for i in range(len(text_chunks))]
         self.docsearch = Chroma.from_texts(text_chunks, embeddings, metadatas=metadata)
 
-        self.chain = load_qa_with_sources_chain(ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.2),
+        self.chain = load_qa_with_sources_chain(ChatOpenAI(model_name="gpt-4", temperature=0.2),
                                                 chain_type="stuff")
 
     async def query_inferences(self, update: Update, context: CallbackContext):
