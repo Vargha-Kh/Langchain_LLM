@@ -69,7 +69,8 @@ class LangchainModel:
     async def query_inferences(self, update: Update, context: CallbackContext):
         if update.effective_chat.id not in self.started_chats:
             return
-        pattern = re.compile(r'^(who|what|where|when|why|how|which|whose|whom|is|are|was|were|am|do|does|did)\b', re.IGNORECASE)
+        pattern = re.compile(r'^(who|what|where|when|why|how|which|whose|whom|is|are|was|were|am|do|does|did)\b',
+                             re.IGNORECASE)
         query_input = update.message.text
         if pattern.match(query_input) or "?" in query_input:
             # Perform similarity search
@@ -78,11 +79,12 @@ class LangchainModel:
             response = results["output_text"].split("\nSOURCES")[0]
             await context.bot.send_message(chat_id=update.effective_chat.id,
                                            text=f"Q:{query_input}\nA:{response}")
-    
+
     async def start(self, update: Update, context: CallbackContext):
         self.started_chats[update.effective_chat.id] = True
         await context.bot.send_message(chat_id=update.effective_chat.id,
-                                               text="Ask your question!")
+                                       text="Ask your question!")
+
 
 def run_bot():
     llm = LangchainModel()
@@ -91,15 +93,19 @@ def run_bot():
     llm.documents_loader_txt(file_names)
     llm.embedding_chunks()
     while True:
-        application = ApplicationBuilder().token(token).build()
-        que = application.job_queue
-        start_handler = CommandHandler('start', llm.start)
-        input_handler = MessageHandler(filters.Text(), llm.query_inferences)
+        try:
+            application = ApplicationBuilder().token(token).build()
+            que = application.job_queue
+            start_handler = CommandHandler('start', llm.start)
+            input_handler = MessageHandler(filters.Text(), llm.query_inferences)
 
-        application.add_handler(start_handler)
-        application.add_handler(input_handler)
+            application.add_handler(start_handler)
+            application.add_handler(input_handler)
 
-        application.run_polling()
+            application.run_polling()
+        except Exception as e:
+            print(e)
+            continue
 
 
 if __name__ == "__main__":
