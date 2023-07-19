@@ -1,6 +1,7 @@
 import os
 import glob
 import warnings
+import argparse
 from pdf2text import PDFtoTXTConverter
 from bs4 import BeautifulSoup
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -21,8 +22,16 @@ google_api_key = "GOOGLE_API_KEY"
 os.environ["OPENAI_API_KEY"] = openai_key
 
 
+# Define function to extract text from PDF
+def extract_text_from_pdf(file_path):
+    converter = PDFtoTXTConverter(file_path, model="easyocr")
+    images = converter.convert_to_images()
+    text = converter.perform_easy_ocr(images)
+    return text
+
+
 class LangchainModel:
-    def __init__(self, model_type="similarity_search"):
+    def __init__(self, llm_model="similarity_search"):
         self.palm_qa = None
         self.results = None
         self.openai_qa = None
@@ -30,25 +39,18 @@ class LangchainModel:
         self.docsearch = None
         self.docs = None
         self.texts = []
-        self.model_type = model_type
+        self.model_type = llm_model
 
-    # Define function to extract text from PDF
-    def extract_text_from_pdf(self, file_path):
-        converter = PDFtoTXTConverter(file_path, model="easyocr")
-        images = converter.convert_to_images()
-        text = converter.perform_easy_ocr(images)
-        return text
-
-    def documents_loader(self, files, mode='files'):
+    def documents_loader(self, files, file_mode='txt'):
         for file_path in files:
             with open(file_path) as f:
-                if mode == 'html':
+                if file_mode == 'html':
                     html_content = f.read()
                     soup = BeautifulSoup(html_content, 'html.parser')
                     text = soup.get_text(separator='\n')
                     self.texts.append(text)
-                elif mode == "pdf":
-                    self.texts.append(self.extract_text_from_pdf(file_path))
+                elif file_mode == "pdf":
+                    self.texts.append(extract_text_from_pdf(file_path))
                 else:
                     text = f.read()
                     self.texts.append(text)
@@ -117,11 +119,24 @@ class LangchainModel:
         print(self.results["output_text"].split("\nSOURCES")[0])
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
+    parser.add_argument('--directory', choices=['html', 'pdf', 'txt'], default='txt',
+                        help='Mode for loading documents (html, pdf, or files)')
+    parser.add_argument('--model_type', choices=['openai_QA', 'similarity_search', 'google_palm'],
+                        default='similarity_search',
+                        help='Model type for processing (openai_QA, similarity_search, or google_palm)')
+    parser.add_argument('--file_format', choices=['html', 'pdf', 'txt'], default='files',
+                        help='Mode for loading documents (html, pdf, or txt)')
+    args = parser.parse_args()
+    return args.directory, args.model_type, args.mode
+
+
 if __name__ == "__main__":
-    llm = LangchainModel(model_type="similarity_search")
-    directory = ""  # Replace with the path to your directory
-    file_names = glob.glob(directory + "/*")
-    llm.documents_loader(file_names, mode='files')
+    directory, model_type, file_format = parse_arguments()
+    llm = LangchainModel(llm_model=model_type)
+    file_names = glob.glob(directory + f"/*{file_format}")
+    llm.documents_loader(file_names, file_mode=file_format)
     llm.embedding_chunks()
     while True:
         query = input("Please ask you question! ")
