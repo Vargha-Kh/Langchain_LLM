@@ -1,26 +1,27 @@
 import os
 import glob
 import warnings
-import pdfminer.high_level
+from langchain.llms import OpenAI
 import re
+import asyncio
 from bs4 import BeautifulSoup
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain.chat_models import ChatOpenAI
 from langchain.vectorstores import Chroma
-from langchain.docstore.document import Document
+from pdf2text import PDFtoTXTConverter
 import telegram
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext, Updater
 
 warnings.filterwarnings("ignore")
 
 # Set OpenAI API Key
-os.environ["OPENAI_API_KEY"] = "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"
+os.environ["OPENAI_API_KEY"] = ""
 
 # Set up Telegram bot
-token = "6035216410:AAEHm0keUv-ULYKUSE9nYiuaPdxZZvVEe-Q"
+token = "Telegram_token"
 bot = telegram.Bot(token=token)
 
 
@@ -32,16 +33,16 @@ class LangchainModel:
         self.texts = []
         self.started_chats = {}
 
-    # Define function to extract text from PDF using pdfminer
+    # Define function to extract text from PDF
     def extract_text_from_pdf(self, file_path):
-        text = pdfminer.high_level.extract_text(file_path)
-        # Remove newline and multiple spaces
-        text = re.sub(r'\n|\s{2,}', ' ', text).replace("..", '')
+        converter = PDFtoTXTConverter(file_path, model="easyocr")
+        images = converter.convert_to_images()
+        text = converter.perform_easy_ocr(images)
         return text
 
     def documents_loader_txt(self, files, mode='files'):
         for file_path in files:
-            with open(file_path) as f:
+            with open(file_path, encoding='utf-8-sig') as f:
                 if mode == 'html':
                     html_content = f.read()
                     soup = BeautifulSoup(html_content, 'html.parser')
@@ -85,28 +86,25 @@ class LangchainModel:
         await context.bot.send_message(chat_id=update.effective_chat.id,
                                        text="Ask your question!")
 
+    def run_bot(self):
+        dispatcher = ApplicationBuilder().token(token).build()
+        dispatcher.add_handler(CommandHandler("start", self.start))
+        dispatcher.add_handler(MessageHandler(filters.Text(), self.query_inferences))
 
-def run_bot():
+        # Start the event loop
+        loop = asyncio.get_event_loop()
+        loop.create_task(dispatcher.run_polling())
+        loop.run_forever()
+
+
+def main():
     llm = LangchainModel()
     directory = "liquidmarket_data"  # Replace with the path to your directory
     file_names = glob.glob(directory + "/*")
     llm.documents_loader_txt(file_names)
     llm.embedding_chunks()
-    while True:
-        try:
-            application = ApplicationBuilder().token(token).build()
-            que = application.job_queue
-            start_handler = CommandHandler('start', llm.start)
-            input_handler = MessageHandler(filters.Text(), llm.query_inferences)
-
-            application.add_handler(start_handler)
-            application.add_handler(input_handler)
-
-            application.run_polling()
-        except Exception as e:
-            print(e)
-            continue
+    llm.run_bot()
 
 
 if __name__ == "__main__":
-    run_bot()
+    main()
