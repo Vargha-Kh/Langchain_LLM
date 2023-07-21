@@ -2,6 +2,7 @@
 
 This is a Python script that demonstrates how to use different language models for question-answering (QA) and document retrieval tasks using Langchain. The script utilizes various language models, including OpenAI's GPT, Google's Palm, and similarity search with Llama_index's retrieval approach, to provide answers to user queries based on the provided documents.
 
+![](img/2.png)
 <br>
 
 ## Setup
@@ -46,6 +47,8 @@ python langchain_llm.py --directory /path/to/documents --model_type similarity_s
 5. Results:
 
     The script will display the answer or retrieved documents based on the provided question/query.
+
+![](img/1.png)
 
 <br>
 
