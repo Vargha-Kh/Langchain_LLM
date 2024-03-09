@@ -10,3 +10,4 @@ pydantic==1.10.8
 python-telegram-bot
 bs4
 pdfminer
+langchain_community
