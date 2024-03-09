@@ -79,7 +79,6 @@ class LangchainModel:
         # text_splitter = CharacterTextSplitter(chunk_size=3000, chunk_overlap=0)
         text_chunks = text_splitter.split_documents(embedding_data)
 
-
         if self.model_type == "openai_QA":
             """RetrievalQA approach for creating datasets for QA document"""
             # Create a vectorstore from documents
@@ -124,12 +123,12 @@ class LangchainModel:
             memory = ConversationBufferMemory(memory_key="chat_history", return_messages=False, output_key='result')
             # Prompt
             template = """
-             <s> [INST] You are an assistant for question-answering tasks. Use the following pieces of retrieved context 
-                to answer the question. If you don't know the answer, just say that you don't know. Use three sentences
-                maximum and keep the answer concise. [/INST] </s> 
-                [INST] Question: {question} 
-                Context: {context} 
-                Answer: [/INST]
+            You are an assistant for religious question-answering tasks.Use the following pieces of context to answer the question at the end. 
+            If you don't know the answer, just say that you don't know, don't try to make up an answer. 
+            Use three sentences maximum and keep the answer as concise as possible. 
+            {context}
+            Question: {question}
+            Helpful Answer:
             """
             QA_CHAIN_PROMPT = PromptTemplate(
                 input_variables=["context", "question"],
