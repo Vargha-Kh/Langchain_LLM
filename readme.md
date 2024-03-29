@@ -17,13 +17,13 @@ pip install -r requirements.txt
 ```
 
 ## Set Up API Keys
-The script uses the OpenAI API key and, optionally, the Google API key for different models. You need to set these API keys as environment variables in your system. Replace OPENAI_API_KEY and GOOGLE_API_KEY with your actual API keys.
+The script uses the OpenAI API key for different models. You need to set these API keys as environment variables in your system. Replace OPENAI_API_KEY with your actual API keys.
 
 
 ## Usage
 1. File Format and Model Type:
 
-    The script supports multiple file support together for loading documents: 'pdf', 'py' and 'txt'. You can specify the desired file format and model type using command-line arguments.
+    The script supports multiple file support together for loading documents: 'pdf', 'py', 'csv', and 'txt'. You can specify the desired file format and model type using command-line arguments.
 
 - --directory: Specify the directory containing the input files (e.g., 'html', 'pdf', or 'txt' files).
 - --model_type: Choose the model type to use for processing (options: 'gpt-4', 'gpt-3.5', 'llama-b7' or 'mistral').
@@ -48,20 +48,28 @@ The script uses the OpenAI API key and, optionally, the Google API key for diffe
 
 <br>
 
-# Examples
+# Streamlit Usage
+For initializing Steamlit UI for running Langchain RAG:
+```
+python main.py --directory /path/to/documents --model_type "gpt-4" --file_format 'txt' + 'csv'
+```
+
+<br>
+
+# Bash Examples
 ## Example 1: Code Review with OpenAI GPT
 ```
-python langchain_llm.py --directory /path/to/documents --model_type "gpt-4" --file_format ['txt', 'py']
+python langchain_llm.py --directory /path/to/documents --model_type "gpt-4" --file_format 'txt' + 'py'
 ```
 
 ## Example 2: Document Retrieval with Mistral
 ```
-python langchain_llm.py --directory /path/to/documents --model_type "mistral" --file_format ['txt', 'pdf']
+python langchain_llm.py --directory /path/to/documents --model_type "mistral" --file_format 'txt' + 'pdf'
 ```
 
 ## Example 3: Question-Answering with Google's Gemma
 ```
-python langchain_llm.py --directory /path/to/documents --model_type "gemma" --file_format ['txt', 'pdf', 'web']
+python langchain_llm.py --directory /path/to/documents --model_type "gemma" --file_format 'txt' + 'pdf' + 'web'
 ```
 
 <br>
