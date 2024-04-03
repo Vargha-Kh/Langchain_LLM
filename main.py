@@ -20,16 +20,19 @@ class StreamlitRAG:
         with st.sidebar:
             st.header("Settings")
 
+        # Thinking spinner session
+        if "thinking_spinner" not in st.session_state:
+            st.session_state.thinking_spinner = []
         # session state
         if "chat_history" not in st.session_state:
             st.session_state.chat_history = [
-                AIMessage(content="Hello, I am a bot. How can I help you?"),
+                AIMessage(content="Hello, I am question-answering bot. How can I help you?"),
             ]
 
         # user input
         user_query = st.chat_input("Ask your question...")
         if user_query is not None and user_query != "":
-            with st.session_state["thinking_spinner"], st.spinner(f"Thinking"):
+            with st.spinner(f"Thinking"):
                 response = self.llm.query_inferences(user_query)
             st.session_state.chat_history.append(HumanMessage(content=user_query))
             st.session_state.chat_history.append(AIMessage(content=response))
