@@ -51,7 +51,7 @@ The script uses the OpenAI API key for different models. You need to set these A
 # Streamlit Usage
 For initializing Steamlit UI for running Langchain RAG:
 ```
-python main.py --directory /path/to/documents --model_type "gpt-4" --file_format 'txt' + 'csv'
+streamlit run main.py --directory /path/to/documents --model_type "gpt-4" --file_format 'txt' + 'csv'
 ```
 
 <br>
