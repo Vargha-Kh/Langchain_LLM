@@ -1,15 +1,12 @@
 import argparse
 import os
-import sys
 import warnings
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chains import ConversationalRetrievalChain, RetrievalQA
-from langchain.chains.qa_with_sources import load_qa_with_sources_chain
 from langchain_community.document_loaders import TextLoader, DirectoryLoader, PyPDFDirectoryLoader, PythonLoader, \
     UnstructuredURLLoader, CSVLoader, UnstructuredCSVLoader
 from langchain_community.embeddings import GPT4AllEmbeddings, OllamaEmbeddings
-from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.memory import (
     CombinedMemory,
@@ -17,18 +14,21 @@ from langchain.memory import (
     ConversationKGMemory,
     ConversationSummaryMemory,
 )
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_experimental.open_clip import OpenCLIPEmbeddings
 from langchain_experimental.tools import PythonREPLTool
 from langchain_core.prompts import PromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.llms import Ollama, OpenAI
-# from langchain_community.chat_models import ChatOpenAI
-from langchain_openai import ChatOpenAI, OpenAI
+from langchain_openai import ChatOpenAI, OpenAI, OpenAIEmbeddings
 from langchain.agents import AgentExecutor, create_openai_tools_agent, initialize_agent, Tool, ZeroShotAgent, \
     ConversationalChatAgent
 from langchain.tools.retriever import create_retriever_tool
-from langchain.chains import LLMChain
+from langchain_experimental.autonomous_agents import AutoGPT
 from langchain import hub
+from utils import get_resized_images, resize_base64_image, img_prompt_func
 from langchain_community.utilities import GoogleSearchAPIWrapper
 import os.path
 
@@ -47,6 +47,9 @@ class LangchainModel:
     """
 
     def __init__(self, llm_model):
+        """
+            Class to handle interactions with different types of language models provided by Langchain.
+        """
         self.loader = None
         self.llm = OpenAI(tempurature=0)
         self.results = None
@@ -56,8 +59,10 @@ class LangchainModel:
         self.temperature = 0.1
         self.chain = None
         self.chat_history = []
-        self.openai_tools_prompt = hub.pull("hwchase17/openai-tools-agent")
-        self.retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
+        # self.openai_tools_prompt = hub.pull("hwchase17/openai-tools-agent")
+        # self.retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
+        # self.rag_prompt = hub.pull("rlm/rag-prompt")
+        # self.react_prompt = hub.pull("hwchase17/react-chat")
         self.retrieval_prompt = """
               You are an assistant for question-answering tasks.Use the following pieces of context to answer the question at the end. 
               If you don't know the answer, just say that you don't know, don't try to make up an answer. 
@@ -78,7 +83,8 @@ class LangchainModel:
 
     def documents_loader(self, data_path, data_types):
         """
-        Load documents from the given directory based on the file mode.
+        Load documents from a given directory and return a list of texts.
+        The method supports multiple data types including python files, PDFs, URLs, CSVs, and text files.
         """
         all_texts = []
         for data_type in data_types:
@@ -102,29 +108,23 @@ class LangchainModel:
                                               loader_kwargs=text_loader_kwargs, use_multithreading=True)
             if self.loader is not None:
                 texts = self.loader.load()
-                all_texts.extend(texts)
+                if data_type == "txt":
+                    all_texts.extend(texts[0])
+                else:
+                    all_texts.extend(texts)
             else:
                 raise ValueError("Data file format is Not correct")
         return all_texts
 
-    def chroma_initialization(self, data_path, text_chunks, embedding_function):
-        if os.path.isfile(os.path.join(data_path, 'chroma.sqlite3')):
-            vector_store = Chroma(persist_directory=data_path, embedding_function=embedding_function)
-            vector_store.persist()
-        else:
-            vector_store = Chroma.from_documents(text_chunks, embedding=embedding_function,
-                                                 persist_directory=data_path)
-        return vector_store
-
-    def ollama_create_chain(self, data_path, text_chunks):
-        vector_store = self.chroma_initialization(data_path, text_chunks, OllamaEmbeddings(model=self.model_type))
+    def ollama_chain_init(self, data_path, data_types):
+        vector_store = self.chroma_embeddings(data_path, data_types, OllamaEmbeddings(model=self.model_type))
 
         # LLM init
         llm = Ollama(model=self.model_type, callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
         # Conversational Memory Buffer
         memory = ConversationBufferMemory(
-            memory_key="chat_history", return_messages=False
+            memory_key="chat_history", input_key="question", return_messages=True
         )
         # Knowledge Graph Memory
         # kg_memory = ConversationKGMemory(llm=llm)
@@ -145,17 +145,51 @@ class LangchainModel:
             verbose=True
         )
 
-    def embedding_chunks(self, data_path, data_types):
+    def chroma_embeddings(self, data_path, data_types, embedding_function):
+        if os.path.isfile(os.path.join(data_path, 'chroma.sqlite3')):
+            vector_store = Chroma(persist_directory=data_path, embedding_function=embedding_function)
+            vector_store.persist()
+        else:
+            embedding_data = self.documents_loader(data_path, data_types)
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=2048, chunk_overlap=100)
+            text_chunks = text_splitter.split_documents(embedding_data)
+            vector_store = Chroma.from_documents(text_chunks, embedding=embedding_function,
+                                                 persist_directory=data_path)
+
+        return vector_store
+
+    def model_chain_init(self, data_path, data_types):
         """
         Embed documents into chunks based on the model type.
         """
-        embedding_data = self.documents_loader(data_path, data_types)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2048, chunk_overlap=100)
-        text_chunks = text_splitter.split_documents(embedding_data)
 
+
+        if self.model_type == "gpt-4-vision":
+            # Load chroma
+            multi_modal_vectorstore = Chroma(
+                collection_name="multi-modal-rag",
+                persist_directory=data_path,
+                embedding_function=OpenCLIPEmbeddings(
+                    model_name="ViT-H-14", checkpoint="laion2b_s32b_b79k"
+                ),
+            )
+            # Initialize the multi-modal Large Language Model with specific parameters
+            model = ChatOpenAI(temperature=0, model="gpt-4-vision-preview", max_tokens=1024)
+
+            # Define the RAG pipeline
+            self.chain = (
+                    {
+                        "context": multi_modal_vectorstore.as_retriever | RunnableLambda(get_resized_images),
+                        "question": RunnablePassthrough(),
+                    }
+                    | RunnableLambda(img_prompt_func)
+                    | model
+                    | StrOutputParser()
+            )
         if self.model_type == "agent_gpt":
-            vectordb = Chroma.from_text(text_chunks, embedding=OpenAIEmbeddings(), persist_directory=data_path)
-            vectordb.persist()
+            # vector_db = Chroma.from_text(text_chunks, embedding=OpenAIEmbeddings(), persist_directory=data_path)
+            # vector_db.persist()
+            vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
             # Conversational Memory Buffer
             conv_memory = ConversationBufferMemory(
@@ -181,7 +215,7 @@ class LangchainModel:
             )
 
             chain_qa = RetrievalQA.from_chain_type(
-                llm=self.llm, chain_type="stuff", retriever=vectordb.as_retriever()
+                llm=self.llm, chain_type="stuff", retriever=vector_db.as_retriever()
             )
 
             qa_retrieval_tool = Tool(
@@ -192,23 +226,39 @@ class LangchainModel:
 
             # Agent's tools initialization for retrievers
             retriever_tool = create_retriever_tool(
-                vectordb.as_retriever(),
+                vector_db.as_retriever(),
                 f"{os.path.basename(data_path)}",
                 f"Searches and returns answers from {os.path.basename(data_path)} document.",
             )
             tools = [retriever_tool, search_tool, qa_retrieval_tool, PythonREPLTool()]
 
+            # # Openai function Agent
+            # message = SystemMessage(
+            #     content=(
+            #         "You are a helpful chatbot who is tasked with answering questions about LangSmith. "
+            #         "Unless otherwise explicitly stated, it is probably fair to assume that questions are about LangSmith. "
+            #         "If there is any ambiguity, you probably assume they are about that."
+            #     )
+            # )
+            # prompt = OpenAIFunctionsAgent.create_prompt(
+            #     system_message=message,
+            #     extra_prompt_messages=[MessagesPlaceholder(variable_name="history")],
+            # )
+            # agent = OpenAIFunctionsAgent(llm=llm, tools=tools, prompt=prompt)
+            #
             # openai agent creation
             agent = create_openai_tools_agent(ChatOpenAI(temperature=0), tools, self.openai_tools_prompt)
             # llm_chain = LLMChain(llm=ChatOpenAI(temperature=0), prompt=self.openai_tools_prompt)
             # agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
             self.chain = AgentExecutor(
-                agent=agent, tools=tools, verbose=True, memory=memory, handle_parsing_errors=True
+                agent=agent, tools=tools, verbose=True, memory=memory, handle_parsing_errors=True,
+                return_intermediate_steps=True
             )
 
         elif self.model_type == "gpt-3.5":
-            vectordb = Chroma.from_documents(text_chunks, embedding=OpenAIEmbeddings(), persist_directory=data_path)
-            vectordb.persist()
+            # vector_db = Chroma.from_documents(text_chunks, embedding=OpenAIEmbeddings(), persist_directory=data_path)
+            # vector_db.persist()
+            vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
             # Conversational Memory Buffer
             memory = ConversationBufferMemory(
@@ -223,8 +273,8 @@ class LangchainModel:
             )
 
             self.chain = ConversationalRetrievalChain.from_llm(
-                ChatOpenAI(temperature=self.temperature, model_name="gpt-3.5"),
-                retriever=vectordb.as_retriever(),
+                ChatOpenAI(temperature=self.temperature, model_name="gpt-3.5-turbo"),
+                retriever=vector_db.as_retriever(),
                 return_source_documents=False,
                 memory=memory,
                 combine_docs_chain_kwargs={"prompt": prompt_template},
@@ -233,7 +283,7 @@ class LangchainModel:
             )
 
         elif self.model_type == "mistral" or "llama-7b" or "gemma" or "mixtral":
-            self.ollama_create_chain(data_path, text_chunks)
+            self.ollama_chain_init(data_path, data_types)
 
     def query_inferences(self, query_input):
         """
@@ -250,6 +300,9 @@ class LangchainModel:
         elif self.model_type == "mistral" or "llama-7b" or "gemma" or "mixtral":
             self.results = self.chain.run({"question": query_input})
             self.chat_history.append((query_input, self.results))
+        if self.model_type == "gpt-4-vision":
+            self.result = self.chain.invoke({"input": query_input})
+            self.results = self.result["output"]
         print(self.results)
         return self.results
 
@@ -260,7 +313,7 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
     parser.add_argument('--directory', default='./data', help='Ingesting files Directory')
-    parser.add_argument('--model_type', choices=['agent_gpt', 'gpt-3.5', 'mistral', "llama-7b", "gemma", "mixtral"],
+    parser.add_argument('--model_type', choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama-7b", "gemma", "mixtral"],
                         default='mistral', help='Model type for processing')
     parser.add_argument('--file_formats', nargs='+', default=['txt', 'pdf'],
                         help='List of file formats for loading documents')
@@ -274,7 +327,7 @@ def main():
     """
     directory, model_type, file_formats = parse_arguments()
     llm = LangchainModel(llm_model=model_type)
-    llm.embedding_chunks(directory, data_types=file_formats)
+    llm.model_chain_init(directory, data_types=file_formats)
     while True:
         query = input("Please ask your question! ")
         llm.query_inferences(query)
