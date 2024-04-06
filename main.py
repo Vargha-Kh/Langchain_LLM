@@ -10,7 +10,7 @@ class StreamlitRAG:
         self.llm = None
         directory, model_type, file_formats = parse_arguments()
         self.llm = LangchainModel(llm_model=model_type)
-        self.llm.embedding_chunks(directory, data_types=file_formats)
+        self.llm.model_chain_init(directory, data_types=file_formats)
 
     def page_config(self):
         st.set_page_config(page_title="Langchain RAG", page_icon="🤖")
