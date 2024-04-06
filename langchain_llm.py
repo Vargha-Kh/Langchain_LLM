@@ -14,6 +14,7 @@ from langchain.memory import (
     ConversationKGMemory,
     ConversationSummaryMemory,
 )
+from langchain_community.tools.tavily_search import TavilySearchResults, TavilyAnswer
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_experimental.open_clip import OpenCLIPEmbeddings
@@ -22,9 +23,11 @@ from langchain_core.prompts import PromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.llms import Ollama, OpenAI
+from langchain_community.chat_models import ChatOllama
 from langchain_openai import ChatOpenAI, OpenAI, OpenAIEmbeddings
-from langchain.agents import AgentExecutor, create_openai_tools_agent, initialize_agent, Tool, ZeroShotAgent, \
-    ConversationalChatAgent
+from langchain.agents import AgentExecutor, create_openai_tools_agent, create_openai_functions_agent, initialize_agent, \
+    Tool, ZeroShotAgent, \
+    ConversationalChatAgent, create_react_agent, create_self_ask_with_search_agent
 from langchain.tools.retriever import create_retriever_tool
 from langchain_experimental.autonomous_agents import AutoGPT
 from langchain import hub
@@ -35,10 +38,10 @@ import os.path
 warnings.filterwarnings("ignore")
 
 # Set OpenAI API Key
-openai_key = "OPENAI_API_KEY"
-os.environ["OPENAI_API_KEY"] = openai_key
-os.environ["GOOGLE_CSE_ID"] = "d3bbbf1c807c64465"
-os.environ["GOOGLE_API_KEY"] = "AIzaSyAJqnjqhi1N0Fx5VpK04NyQCi890z-xUBc"
+os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
+os.environ["GOOGLE_CSE_ID"] = "YOUR_GOOGLE_CSE_ID"
+os.environ["GOOGLE_API_KEY"] = "YOUR-GOOGLE-API-KEY"
+os.environ["TAVILY_API_KEY"] = "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"
 
 
 class LangchainModel:
@@ -51,7 +54,7 @@ class LangchainModel:
             Class to handle interactions with different types of language models provided by Langchain.
         """
         self.loader = None
-        self.llm = OpenAI(tempurature=0)
+        self.llm = OpenAI()
         self.results = None
         self.model_type = llm_model
         self.text_splitter = None
@@ -59,10 +62,12 @@ class LangchainModel:
         self.temperature = 0.1
         self.chain = None
         self.chat_history = []
-        # self.openai_tools_prompt = hub.pull("hwchase17/openai-tools-agent")
+        self.openai_tools_prompt = hub.pull("hwchase17/openai-tools-agent")
+        self.openai_functions_prompt = hub.pull("hwchase17/openai-functions-agent")
         # self.retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
         # self.rag_prompt = hub.pull("rlm/rag-prompt")
-        # self.react_prompt = hub.pull("hwchase17/react-chat")
+        self.ask_search_prompt = hub.pull("hwchase17/self-ask-with-search")
+        self.react_prompt = hub.pull("hwchase17/react-chat")
         self.retrieval_prompt = """
               You are an assistant for question-answering tasks.Use the following pieces of context to answer the question at the end. 
               If you don't know the answer, just say that you don't know, don't try to make up an answer. 
@@ -146,10 +151,18 @@ class LangchainModel:
         )
 
     def chroma_embeddings(self, data_path, data_types, embedding_function):
-        if os.path.isfile(os.path.join(data_path, 'chroma.sqlite3')):
-            vector_store = Chroma(persist_directory=data_path, embedding_function=embedding_function)
-            vector_store.persist()
-        else:
+        try:
+            if os.path.isfile(os.path.join(data_path, 'chroma.sqlite3')):
+                vector_store = Chroma(persist_directory=data_path, embedding_function=embedding_function)
+                vector_store.persist()
+            else:
+                embedding_data = self.documents_loader(data_path, data_types)
+                text_splitter = RecursiveCharacterTextSplitter(chunk_size=2048, chunk_overlap=100)
+                text_chunks = text_splitter.split_documents(embedding_data)
+                vector_store = Chroma.from_documents(text_chunks, embedding=embedding_function,
+                                                     persist_directory=data_path)
+        except InvalidDimensionException:
+            Chroma().delete_collection()
             embedding_data = self.documents_loader(data_path, data_types)
             text_splitter = RecursiveCharacterTextSplitter(chunk_size=2048, chunk_overlap=100)
             text_chunks = text_splitter.split_documents(embedding_data)
@@ -162,7 +175,6 @@ class LangchainModel:
         """
         Embed documents into chunks based on the model type.
         """
-
 
         if self.model_type == "gpt-4-vision":
             # Load chroma
@@ -187,32 +199,27 @@ class LangchainModel:
                     | StrOutputParser()
             )
         if self.model_type == "agent_gpt":
-            # vector_db = Chroma.from_text(text_chunks, embedding=OpenAIEmbeddings(), persist_directory=data_path)
-            # vector_db.persist()
             vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
             # Conversational Memory Buffer
             conv_memory = ConversationBufferMemory(
-                memory_key="chat_history_lines", input_key="question"
+                memory_key="chat_history", input_key="input"
             )
-            # Summarization Memory
-            summary_memory = ConversationSummaryMemory(llm=self.llm)
-            # Memory Modules Combined
-            memory = CombinedMemory(memories=[conv_memory, summary_memory])
 
-            # Prompt template Definition
-            prompt_template = PromptTemplate(
-                input_variables=["history", "input", "chat_history_lines"],
-                template=self.conversation_prompt,
-            )
+            # Summarization Memory
+            # summary_memory = ConversationSummaryMemory(llm=self.llm)
+            # Memory Modules Combined
+            # memory = CombinedMemory(memories=[conv_memory, summary_memory])
 
             # Google Search API tool initialization
-            search = GoogleSearchAPIWrapper()
-            search_tool = Tool(
-                name="Search",
-                func=search.run,
-                description="useful for when you need to answer questions about current events",
-            )
+            # google_search = GoogleSearchAPIWrapper()
+            # google_search_tool = Tool(
+            #     name="Search",
+            #     func=google_search.run,
+            #     description="useful for when you need to answer questions about current events",
+            # )
+
+            search_tool = TavilySearchResults(max_results=1)
 
             chain_qa = RetrievalQA.from_chain_type(
                 llm=self.llm, chain_type="stuff", retriever=vector_db.as_retriever()
@@ -232,32 +239,23 @@ class LangchainModel:
             )
             tools = [retriever_tool, search_tool, qa_retrieval_tool, PythonREPLTool()]
 
-            # # Openai function Agent
-            # message = SystemMessage(
-            #     content=(
-            #         "You are a helpful chatbot who is tasked with answering questions about LangSmith. "
-            #         "Unless otherwise explicitly stated, it is probably fair to assume that questions are about LangSmith. "
-            #         "If there is any ambiguity, you probably assume they are about that."
-            #     )
-            # )
-            # prompt = OpenAIFunctionsAgent.create_prompt(
-            #     system_message=message,
-            #     extra_prompt_messages=[MessagesPlaceholder(variable_name="history")],
-            # )
-            # agent = OpenAIFunctionsAgent(llm=llm, tools=tools, prompt=prompt)
-            #
-            # openai agent creation
-            agent = create_openai_tools_agent(ChatOpenAI(temperature=0), tools, self.openai_tools_prompt)
-            # llm_chain = LLMChain(llm=ChatOpenAI(temperature=0), prompt=self.openai_tools_prompt)
-            # agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
+            # Openai function Agent
+            openai_agent = create_openai_functions_agent(ChatOpenAI(model="gpt-3.5-turbo-1106"), tools,
+                                                         self.openai_functions_prompt)
+
+            # Create ReAct Agent
+            react_agent = create_react_agent(ChatOpenAI(temperature=0), tools, self.react_prompt)
+
+            # Create self-ask search Agent
+            self_ask_agent = create_self_ask_with_search_agent(ChatOpenAI(temperature=0), [
+                TavilyAnswer(max_results=1, name="Intermediate Answer")], self.ask_search_prompt)
+
             self.chain = AgentExecutor(
-                agent=agent, tools=tools, verbose=True, memory=memory, handle_parsing_errors=True,
+                agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
                 return_intermediate_steps=True
             )
 
         elif self.model_type == "gpt-3.5":
-            # vector_db = Chroma.from_documents(text_chunks, embedding=OpenAIEmbeddings(), persist_directory=data_path)
-            # vector_db.persist()
             vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
             # Conversational Memory Buffer
@@ -265,7 +263,7 @@ class LangchainModel:
                 memory_key="chat_history", return_messages=False
             )
             # Knowledge Graph Memory
-            # kg_memory = ConversationKGMemory(llm=llm)
+            # kg_memory = ConversationKGMemory(llm=self.llm)
 
             prompt_template = PromptTemplate(
                 input_variables=["context", "question", "chat_history"],
@@ -281,16 +279,83 @@ class LangchainModel:
                 get_chat_history=lambda h: h,
                 verbose=True
             )
+        elif self.model_type == "mixtral_agent":
+            vector_db = self.chroma_embeddings(data_path, data_types, OllamaEmbeddings(model="mixtral"))
+
+            # Ollama init
+            llm = ChatOllama(model='mixtral', callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+
+            # Conversational Memory Buffer
+            conv_memory = ConversationBufferMemory(
+                memory_key="chat_history", input_key="input"
+            )
+
+            # Summarization Memory
+            # summary_memory = ConversationSummaryMemory(llm=self.llm)
+            # Memory Modules Combined
+            # memory = CombinedMemory(memories=[conv_memory, summary_memory])
+
+            search_tool = TavilySearchResults(max_results=1)
+
+            chain_qa = RetrievalQA.from_chain_type(
+                llm=llm, chain_type="stuff", retriever=vector_db.as_retriever()
+            )
+
+            qa_retrieval_tool = Tool(
+                name=f"{os.path.basename(data_path)}",
+                func=chain_qa.run,
+                description=f"useful for when you need to answer questions about {os.path.basename(data_path)}. Input should be a fully formed question.",
+            )
+
+            # Agent's tools initialization for retrievers
+            retriever_tool = create_retriever_tool(
+                vector_db.as_retriever(),
+                f"{os.path.basename(data_path)}",
+                f"Searches and returns answers from {os.path.basename(data_path)} document.",
+            )
+            tools = [retriever_tool, search_tool, qa_retrieval_tool, PythonREPLTool()]
+
+            # Create ReAct Agent
+            react_agent = create_react_agent(llm, tools, self.react_prompt)
+
+            self.chain = AgentExecutor(
+                agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
+                return_intermediate_steps=True
+            )
+
 
         elif self.model_type == "mistral" or "llama-7b" or "gemma" or "mixtral":
             self.ollama_chain_init(data_path, data_types)
+        elif self.model_type == "bakllava":
+            # Load chroma
+            multi_modal_vectorstore = Chroma(
+                collection_name="multi-modal-rag",
+                persist_directory=data_path,
+                embedding_function=OpenCLIPEmbeddings(
+                    model_name="ViT-H-14", checkpoint="laion2b_s32b_b79k"
+                ),
+            )
+
+            # LLM init
+            model = Ollama(model=self.model_type, callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+
+            # Define the RAG pipeline
+            self.chain = (
+                    {
+                        "context": multi_modal_vectorstore.as_retriever | RunnableLambda(get_resized_images),
+                        "question": RunnablePassthrough(),
+                    }
+                    | RunnableLambda(img_prompt_func)
+                    | model
+                    | StrOutputParser()
+            )
 
     def query_inferences(self, query_input):
         """
         Perform inference based on the query input and the model type.
         """
-        if self.model_type == "agent_gpt":
-            self.result = self.chain.invoke({"input": query_input})
+        if self.model_type == "agent_gpt" or "mixtral_agent":
+            self.result = self.chain.invoke({"input": query_input, "chat_history": self.chat_history})
             self.results = self.result["output"]
             self.chat_history.append((query_input, self.results))
         elif self.model_type == "gpt-3.5":
@@ -313,7 +378,9 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
     parser.add_argument('--directory', default='./data', help='Ingesting files Directory')
-    parser.add_argument('--model_type', choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama-7b", "gemma", "mixtral"],
+    parser.add_argument('--model_type',
+                        choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama-7b", "gemma", "mixtral",
+                                 "bakllava", "mixtral_agent"],
                         default='mistral', help='Model type for processing')
     parser.add_argument('--file_formats', nargs='+', default=['txt', 'pdf'],
                         help='List of file formats for loading documents')
