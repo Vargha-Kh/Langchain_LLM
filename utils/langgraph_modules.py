@@ -1241,4 +1241,7 @@ class CodeAssistant:
 
     def invoke(self, input_query):
         results = self.app.invoke({"messages": [("user", input_query)], "iterations": 0})
-        print(results)
+        print("Message: ")
+        print(results['generation'].prefix)
+        print("Code: ")
+        print(results['generation'].code)
