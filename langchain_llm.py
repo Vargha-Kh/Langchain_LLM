@@ -1,11 +1,13 @@
 import argparse
 import os
 import warnings
+import getpass
+from chromadb.errors import InvalidDimensionException
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.chains import ConversationalRetrievalChain, RetrievalQA
 from langchain_community.document_loaders import TextLoader, DirectoryLoader, PyPDFDirectoryLoader, PythonLoader, \
-    UnstructuredURLLoader, CSVLoader, UnstructuredCSVLoader
+    UnstructuredURLLoader, CSVLoader, UnstructuredCSVLoader, GitLoader
 from langchain_community.embeddings import GPT4AllEmbeddings, OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.memory import (
@@ -31,17 +33,21 @@ from langchain.agents import AgentExecutor, create_openai_tools_agent, create_op
 from langchain.tools.retriever import create_retriever_tool
 from langchain_experimental.autonomous_agents import AutoGPT
 from langchain import hub
-from utils import get_resized_images, resize_base64_image, img_prompt_func
+from utils import get_resized_images, resize_base64_image, img_prompt_func, AgenticRAG, AdaptiveRAG, CodeAssistant
 from langchain_community.utilities import GoogleSearchAPIWrapper
+from utils.tools import *
 import os.path
 
 warnings.filterwarnings("ignore")
 
 # Set OpenAI API Key
-os.environ["OPENAI_API_KEY"] = "YOUR_OPENAI_API_KEY"
+os.environ["OPENAI_API_KEY"] = getpass.getpass("Your OpenAI API key: ")
+
 os.environ["GOOGLE_CSE_ID"] = "YOUR_GOOGLE_CSE_ID"
 os.environ["GOOGLE_API_KEY"] = "YOUR-GOOGLE-API-KEY"
 os.environ["TAVILY_API_KEY"] = "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"
+os.environ["BING_SUBSCRIPTION_KEY"] = "<key>"
+os.environ["BING_SEARCH_URL"] = "https://api.bing.microsoft.com/v7.0/search"
 
 
 class LangchainModel:
@@ -111,6 +117,12 @@ class LangchainModel:
                 text_loader_kwargs = {'autodetect_encoding': True}
                 self.loader = DirectoryLoader(data_path, glob="**/*.txt", loader_cls=TextLoader,
                                               loader_kwargs=text_loader_kwargs, use_multithreading=True)
+            elif data_type == 'repo':
+                self.loader = GitLoader(
+                    clone_url="https://github.com/langchain-ai/langchain",
+                    repo_path="./test_repo/",
+                    branch="master",
+                )
             if self.loader is not None:
                 texts = self.loader.load()
                 if data_type == "txt":
@@ -198,6 +210,32 @@ class LangchainModel:
                     | model
                     | StrOutputParser()
             )
+        elif self.model_type == "agentic_rag":
+            vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
+
+            # Agent's tools initialization for retrievers
+            retriever_tool = create_retriever_tool(
+                vector_db.as_retriever(),
+                f"{os.path.basename(data_path)}",
+                f"Searches and returns answers from {os.path.basename(data_path)} document.",
+            )
+
+            # initialize AgenticRAG graphs
+            self.chain = AgenticRAG(retriever_tool)
+            self.chain.create_graph()
+
+        if self.model_type == "adaptive_rag":
+            # Chroma Vectorstore
+            vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
+            # initialize Adaptive RAG
+            self.chain = AdaptiveRAG(vector_db.as_retriever())
+            self.chain.create_graph()
+        if self.model_type == "code_assistant":
+            # Chroma Vectorstore
+            vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
+            # initialize Adaptive RAG
+            self.chain = CodeAssistant(vector_db.as_retriever())
+            self.chain.create_graph()
         if self.model_type == "agent_gpt":
             vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
@@ -206,38 +244,13 @@ class LangchainModel:
                 memory_key="chat_history", input_key="input"
             )
 
-            # Summarization Memory
-            # summary_memory = ConversationSummaryMemory(llm=self.llm)
-            # Memory Modules Combined
-            # memory = CombinedMemory(memories=[conv_memory, summary_memory])
-
-            # Google Search API tool initialization
-            # google_search = GoogleSearchAPIWrapper()
-            # google_search_tool = Tool(
-            #     name="Search",
-            #     func=google_search.run,
-            #     description="useful for when you need to answer questions about current events",
-            # )
-
             search_tool = TavilySearchResults(max_results=1)
 
-            chain_qa = RetrievalQA.from_chain_type(
-                llm=self.llm, chain_type="stuff", retriever=vector_db.as_retriever()
-            )
-
-            qa_retrieval_tool = Tool(
-                name=f"{os.path.basename(data_path)}",
-                func=chain_qa.run,
-                description=f"useful for when you need to answer questions about {os.path.basename(data_path)}. Input should be a fully formed question.",
-            )
-
             # Agent's tools initialization for retrievers
-            retriever_tool = create_retriever_tool(
-                vector_db.as_retriever(),
-                f"{os.path.basename(data_path)}",
-                f"Searches and returns answers from {os.path.basename(data_path)} document.",
-            )
-            tools = [retriever_tool, search_tool, qa_retrieval_tool, PythonREPLTool()]
+            qa_retrieval_tool = retrieval_qa_tool(os.path.basename(data_path), vector_db, self.llm)
+            retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
+
+            tools = [retriever_tool, search_tool, qa_retrieval_tool]
 
             # Openai function Agent
             openai_agent = create_openai_functions_agent(ChatOpenAI(model="gpt-3.5-turbo-1106"), tools,
@@ -295,25 +308,10 @@ class LangchainModel:
             # Memory Modules Combined
             # memory = CombinedMemory(memories=[conv_memory, summary_memory])
 
-            search_tool = TavilySearchResults(max_results=1)
+            search_tool = create_search_tool(engine="arxiv")
+            retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
 
-            chain_qa = RetrievalQA.from_chain_type(
-                llm=llm, chain_type="stuff", retriever=vector_db.as_retriever()
-            )
-
-            qa_retrieval_tool = Tool(
-                name=f"{os.path.basename(data_path)}",
-                func=chain_qa.run,
-                description=f"useful for when you need to answer questions about {os.path.basename(data_path)}. Input should be a fully formed question.",
-            )
-
-            # Agent's tools initialization for retrievers
-            retriever_tool = create_retriever_tool(
-                vector_db.as_retriever(),
-                f"{os.path.basename(data_path)}",
-                f"Searches and returns answers from {os.path.basename(data_path)} document.",
-            )
-            tools = [retriever_tool, search_tool, qa_retrieval_tool, PythonREPLTool()]
+            tools = [retriever_tool, search_tool]
 
             # Create ReAct Agent
             react_agent = create_react_agent(llm, tools, self.react_prompt)
@@ -322,9 +320,7 @@ class LangchainModel:
                 agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
                 return_intermediate_steps=True
             )
-
-
-        elif self.model_type == "mistral" or "llama-7b" or "gemma" or "mixtral":
+        elif self.model_type == self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r":
             self.ollama_chain_init(data_path, data_types)
         elif self.model_type == "bakllava":
             # Load chroma
@@ -354,7 +350,7 @@ class LangchainModel:
         """
         Perform inference based on the query input and the model type.
         """
-        if self.model_type == "agent_gpt" or "mixtral_agent":
+        if self.model_type == "agent_gpt" or self.model_type == "mixtral_agent":
             self.result = self.chain.invoke({"input": query_input, "chat_history": self.chat_history})
             self.results = self.result["output"]
             self.chat_history.append((query_input, self.results))
@@ -362,12 +358,13 @@ class LangchainModel:
             result = self.chain({"question": query_input, "chat_history": self.chat_history})
             self.results = result["answer"]
             self.chat_history.append((query_input, self.results))
-        elif self.model_type == "mistral" or "llama-7b" or "gemma" or "mixtral":
+        elif self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r":
             self.results = self.chain.run({"question": query_input})
             self.chat_history.append((query_input, self.results))
-        if self.model_type == "gpt-4-vision":
-            self.result = self.chain.invoke({"input": query_input})
-            self.results = self.result["output"]
+        elif self.model_type == "gpt-4-vision" or self.model_type == "bakllava":
+            self.result = self.chain.invoke({"question": query_input})
+        elif self.model_type == "agentic_rag" or self.model_type == "adaptive_rag" or self.model_type == "code_assistant":
+            self.chain.invoke(query_input)
         print(self.results)
         return self.results
 
@@ -380,8 +377,9 @@ def parse_arguments():
     parser.add_argument('--directory', default='./data', help='Ingesting files Directory')
     parser.add_argument('--model_type',
                         choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama-7b", "gemma", "mixtral",
-                                 "bakllava", "mixtral_agent"],
-                        default='mistral', help='Model type for processing')
+                                 "bakllava", "mixtral_agent", "command-r", "agentic_rag", "adaptive_rag",
+                                 "code_assistant"],
+                        default='code_assistant', help='Model type for processing')
     parser.add_argument('--file_formats', nargs='+', default=['txt', 'pdf'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
