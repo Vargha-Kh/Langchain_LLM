@@ -40,7 +40,8 @@ prompts_dictionary = {
     "ask_search": ask_search_prompt,
     "react": react_prompt,
     "conversation": conversation_prompt,
-    "summary": summary_prompt
+    "summary": summary_prompt,
+    "retrieval":retrieval_prompt
 }
 
 

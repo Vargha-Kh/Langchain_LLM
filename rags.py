@@ -5,7 +5,7 @@ import getpass
 from chromadb.errors import InvalidDimensionException
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.chains import ConversationalRetrievalChain, RetrievalQA
+from langchain.chains import ConversationalRetrievalChain, RetrievalQA, LLMChain
 from langchain_community.document_loaders import TextLoader, DirectoryLoader, PyPDFDirectoryLoader, PythonLoader, \
     UnstructuredURLLoader, CSVLoader, UnstructuredCSVLoader, GitLoader
 from langchain_community.embeddings import GPT4AllEmbeddings, OllamaEmbeddings
@@ -15,6 +15,7 @@ from langchain.memory import (
     ConversationBufferMemory,
     ConversationKGMemory,
     ConversationSummaryMemory,
+    ReadOnlySharedMemory
 )
 from langchain_community.tools.tavily_search import TavilySearchResults, TavilyAnswer
 from langchain_core.output_parsers import StrOutputParser
@@ -33,8 +34,13 @@ from langchain.agents import AgentExecutor, create_openai_tools_agent, create_op
 from langchain.tools.retriever import create_retriever_tool
 from langchain_experimental.autonomous_agents import AutoGPT
 from langchain import hub
-from utils import get_resized_images, resize_base64_image, img_prompt_func, AgenticRAG, AdaptiveRAG, CodeAssistant
+from utils import get_resized_images, resize_base64_image, img_prompt_func, AgenticRAG, AdaptiveRAG, CodeAssistant, \
+    get_prompt
 from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain_community.document_loaders.generic import GenericLoader
+from langchain_community.document_loaders.parsers import LanguageParser
+from langchain_text_splitters import Language
+from git import Repo
 from utils.tools import *
 import os.path
 
@@ -68,29 +74,6 @@ class LangchainModel:
         self.temperature = 0.1
         self.chain = None
         self.chat_history = []
-        self.openai_tools_prompt = hub.pull("hwchase17/openai-tools-agent")
-        self.openai_functions_prompt = hub.pull("hwchase17/openai-functions-agent")
-        # self.retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")
-        # self.rag_prompt = hub.pull("rlm/rag-prompt")
-        self.ask_search_prompt = hub.pull("hwchase17/self-ask-with-search")
-        self.react_prompt = hub.pull("hwchase17/react-chat")
-        self.retrieval_prompt = """
-              You are an assistant for question-answering tasks.Use the following pieces of context to answer the question at the end. 
-              If you don't know the answer, just say that you don't know, don't try to make up an answer. 
-              {chat_history}
-              
-              {context}
-              Question: {question}
-              Helpful Answer:
-              """
-        self.conversation_prompt = """You are an assistant for question-answering tasks, Use the following pieces of context to answer the question. The following is a friendly conversation between a human and an AI. The AI is talkative and provides lots of specific details from its context. If the AI does not know the answer to a question, it truthfully says it does not know.
-            {context}
-            Summary of conversation:
-            {history}
-            Current conversation:
-            {chat_history_lines}
-            Human: {question}
-            AI:"""
 
     def documents_loader(self, data_path, data_types):
         """
@@ -118,11 +101,19 @@ class LangchainModel:
                 self.loader = DirectoryLoader(data_path, glob="**/*.txt", loader_cls=TextLoader,
                                               loader_kwargs=text_loader_kwargs, use_multithreading=True)
             elif data_type == 'repo':
-                self.loader = GitLoader(
-                    clone_url="https://github.com/langchain-ai/langchain",
-                    repo_path="./test_repo/",
-                    branch="master",
+                # Clone
+                repo_path = "./test_repo"
+                # repo = Repo.clone_from("https://github.com/Vargha-Kh/INDE_577_Machine_Learning_Cookbooks/", to_path=repo_path)
+
+                # Load
+                self.loader = GenericLoader.from_filesystem(
+                    repo_path,
+                    glob="**/*",
+                    suffixes=[".py"],
+                    exclude=["**/non-utf8-encoding.py"],
+                    parser=LanguageParser(language=Language.PYTHON, parser_threshold=500),
                 )
+
             if self.loader is not None:
                 texts = self.loader.load()
                 if data_type == "txt":
@@ -244,24 +235,42 @@ class LangchainModel:
                 memory_key="chat_history", input_key="input"
             )
 
+            # Summary Memory Module
+            prompt_template = PromptTemplate(input_variables=["input", "chat_history"], template=get_prompt("summary"))
+            read_only_memory = ReadOnlySharedMemory(memory=conv_memory)
+
+            summary_chain = LLMChain(
+                llm=self.llm,
+                prompt=prompt_template,
+                verbose=True,
+                memory=read_only_memory,  # use the read-only memory to prevent the tool from modifying the memory
+            )
+
+            # Define summary memory tool
+            summary_memory_tool = Tool(
+                name="Summary",
+                func=summary_chain.run,
+                description="useful for when you summarize a conversation. The input to this tool should be a string, representing who will read this summary.",
+            )
+
             search_tool = TavilySearchResults(max_results=1)
 
             # Agent's tools initialization for retrievers
             qa_retrieval_tool = retrieval_qa_tool(os.path.basename(data_path), vector_db, self.llm)
             retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
 
-            tools = [retriever_tool, search_tool, qa_retrieval_tool]
+            tools = [retriever_tool, search_tool, qa_retrieval_tool, summary_memory_tool]
 
-            # Openai function Agent
-            openai_agent = create_openai_functions_agent(ChatOpenAI(model="gpt-3.5-turbo-1106"), tools,
-                                                         self.openai_functions_prompt)
+            # Create Openai function Agent
+            # openai_agent = create_openai_functions_agent(ChatOpenAI(model="gpt-3.5-turbo-1106"), tools,
+            #                                              self.openai_functions_prompt)
 
             # Create ReAct Agent
-            react_agent = create_react_agent(ChatOpenAI(temperature=0), tools, self.react_prompt)
+            react_agent = create_react_agent(ChatOpenAI(temperature=0), tools, get_prompt("react"))
 
             # Create self-ask search Agent
             self_ask_agent = create_self_ask_with_search_agent(ChatOpenAI(temperature=0), [
-                TavilyAnswer(max_results=1, name="Intermediate Answer")], self.ask_search_prompt)
+                TavilyAnswer(max_results=1, name="Intermediate Answer")], get_prompt("ask_search"))
 
             self.chain = AgentExecutor(
                 agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
@@ -280,7 +289,7 @@ class LangchainModel:
 
             prompt_template = PromptTemplate(
                 input_variables=["context", "question", "chat_history"],
-                template=self.retrieval_prompt,
+                template=get_prompt("retrieval"),
             )
 
             self.chain = ConversationalRetrievalChain.from_llm(
@@ -314,7 +323,7 @@ class LangchainModel:
             tools = [retriever_tool, search_tool]
 
             # Create ReAct Agent
-            react_agent = create_react_agent(llm, tools, self.react_prompt)
+            react_agent = create_react_agent(llm, tools, get_prompt("react"))
 
             self.chain = AgentExecutor(
                 agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
@@ -379,7 +388,7 @@ def parse_arguments():
                         choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama-7b", "gemma", "mixtral",
                                  "bakllava", "mixtral_agent", "command-r", "agentic_rag", "adaptive_rag",
                                  "code_assistant"],
-                        default='code_assistant', help='Model type for processing')
+                        default='agentic_rag', help='Model type for processing')
     parser.add_argument('--file_formats', nargs='+', default=['txt', 'pdf'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
