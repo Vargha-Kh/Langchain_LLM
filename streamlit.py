@@ -13,7 +13,6 @@ from langchain.schema import SystemMessage, AIMessage, HumanMessage
 from langchain.prompts import MessagesPlaceholder
 from langsmith import Client
 
-os.environ["OPENAI_API_KEY"] = "sk-proj-vJwpU2k60PHhEDBrOE2mT3BlbkFJyPOz1v7GXAVXiox38eEQ"
 os.environ["LANGCHAIN_API_KEY"] = "ls__12ea7979a9254bc7b7a4a0f40ec62356"
 
 client = Client()

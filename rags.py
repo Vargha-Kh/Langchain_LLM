@@ -47,8 +47,7 @@ import os.path
 warnings.filterwarnings("ignore")
 
 # Set OpenAI API Key
-# os.environ["OPENAI_API_KEY"] = getpass.getpass("Your OpenAI API key: ")
-os.environ["OPENAI_API_KEY"] = "sk-proj-vJwpU2k60PHhEDBrOE2mT3BlbkFJyPOz1v7GXAVXiox38eEQ"
+os.environ["OPENAI_API_KEY"] = getpass.getpass("Your OpenAI API key: ")
 os.environ["GOOGLE_CSE_ID"] = "YOUR_GOOGLE_CSE_ID"
 os.environ["GOOGLE_API_KEY"] = "YOUR-GOOGLE-API-KEY"
 os.environ["TAVILY_API_KEY"] = "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"
