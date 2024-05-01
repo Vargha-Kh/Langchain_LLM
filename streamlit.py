@@ -1,50 +1,30 @@
-"""Python file to serve as the frontend"""
-import streamlit as st
-from langchain_core.messages import AIMessage, HumanMessage
 import argparse
-from langchain_llm import LangchainModel
+import streamlit as st
+import os
+from langchain.agents.openai_functions_agent.agent_token_buffer_memory import (
+    AgentTokenBufferMemory,
+)
+from langchain.chains.conversation.memory import ConversationBufferMemory
+from rags import LangchainModel
+from langchain_community.chat_models import ChatOpenAI
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.callbacks import StreamlitCallbackHandler
+from langchain.schema import SystemMessage, AIMessage, HumanMessage
+from langchain.prompts import MessagesPlaceholder
+from langsmith import Client
 
+os.environ["OPENAI_API_KEY"] = "sk-proj-vJwpU2k60PHhEDBrOE2mT3BlbkFJyPOz1v7GXAVXiox38eEQ"
+os.environ["LANGCHAIN_API_KEY"] = "ls__12ea7979a9254bc7b7a4a0f40ec62356"
 
-class StreamlitRAG:
-    def __init__(self):
-        self.llm = None
-        directory, model_type, file_formats = parse_arguments()
-        self.llm = LangchainModel(llm_model=model_type)
-        self.llm.model_chain_init(directory, data_types=file_formats)
+client = Client()
 
-    def page_config(self):
-        st.set_page_config(page_title="Langchain RAG", page_icon="🤖")
-        st.title("Chat with Documents")
-
-        # sidebar
-        with st.sidebar:
-            st.header("Settings")
-
-        # Thinking spinner session
-        if "thinking_spinner" not in st.session_state:
-            st.session_state.thinking_spinner = []
-        # session state
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = [
-                AIMessage(content="Hello, I am question-answering bot. How can I help you?"),
-            ]
-
-        # user input
-        user_query = st.chat_input("Ask your question...")
-        if user_query is not None and user_query != "":
-            with st.spinner(f"Thinking"):
-                response = self.llm.query_inferences(user_query)
-            st.session_state.chat_history.append(HumanMessage(content=user_query))
-            st.session_state.chat_history.append(AIMessage(content=response))
-
-        # conversation
-        for message in st.session_state.chat_history:
-            if isinstance(message, AIMessage):
-                with st.chat_message("AI"):
-                    st.write(message.content)
-            elif isinstance(message, HumanMessage):
-                with st.chat_message("Human"):
-                    st.write(message.content)
+st.set_page_config(
+    page_title="ChatLangChain",
+    page_icon="🦜",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+"# Chat🦜🔗"
 
 
 def parse_arguments():
@@ -53,14 +33,68 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
     parser.add_argument('--directory', default='./data', help='Ingesting files Directory')
-    parser.add_argument('--model_type', choices=['gpt-4', 'gpt-3.5', 'mistral', "llama-7b", "gemma", "mixtral"],
-                        default='mistral', help='Model type for processing')
-    parser.add_argument('--file_formats', nargs='+', default=['txt', 'pdf'],
+    parser.add_argument('--model_type',
+                        choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama3-70b", "llama:7b", "gemma",
+                                 "mixtral", "bakllava", "llama_agent", "command-r", "agentic_rag", "adaptive_rag",
+                                 "code_assistant"],
+                        default="agent_gpt", help='Model type for processing')
+    parser.add_argument('--file_formats', nargs='+', default=['pdf'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
     return args.directory, args.model_type, args.file_formats
 
 
-if __name__ == "__main__":
-    st_main_component = StreamlitRAG()
-    st_main_component.page_config()
+# @st.cache_resource(ttl="1h")
+# LLM Model init
+directory, model_type, file_formats = parse_arguments()
+llm = LangchainModel(llm_model=model_type)
+llm.model_chain_init(directory, data_types=file_formats)
+outputs = {}
+
+# Token Memory for Streamlit
+if "agent" in model_type:
+    memory = AgentTokenBufferMemory(llm=llm.llm)
+else:
+    memory = ConversationBufferMemory(llm=llm.llm)
+
+# Streamlit Interface
+starter_message = "Ask me anything!"
+if "messages" not in st.session_state or st.sidebar.button("Clear message history"):
+    st.session_state["messages"] = [AIMessage(content=starter_message)]
+
+
+def send_feedback(run_id, score):
+    client.create_feedback(run_id, "user_score", score=score)
+
+
+for msg in st.session_state.messages:
+    if isinstance(msg, AIMessage):
+        st.chat_message("assistant").write(msg.content)
+    elif isinstance(msg, HumanMessage):
+        st.chat_message("user").write(msg.content)
+    memory.chat_memory.add_message(msg)
+
+if prompt := st.chat_input(placeholder=starter_message):
+    st.chat_message("user").write(prompt)
+    with st.chat_message("assistant"):
+        st_callback = StreamlitCallbackHandler(st.container())
+        response, results = llm.query_inferences(prompt)
+        outputs["output"] = response
+        st.session_state.messages.append(AIMessage(content=response))
+        st.write(response)
+        print(results)
+        memory.save_context({"input": prompt}, results)
+        st.session_state["messages"] = memory.buffer
+
+        # Feedback setup
+        run_id = results["__run"].run_id
+
+        col_blank, col_text, col1, col2 = st.columns([10, 2, 1, 1])
+        with col_text:
+            st.text("Feedback:")
+
+        with col1:
+            st.button("👍", on_click=send_feedback, args=(run_id, 1))
+
+        with col2:
+            st.button("👎", on_click=send_feedback, args=(run_id, 0))
