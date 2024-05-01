@@ -47,8 +47,8 @@ import os.path
 warnings.filterwarnings("ignore")
 
 # Set OpenAI API Key
-os.environ["OPENAI_API_KEY"] = getpass.getpass("Your OpenAI API key: ")
-
+# os.environ["OPENAI_API_KEY"] = getpass.getpass("Your OpenAI API key: ")
+os.environ["OPENAI_API_KEY"] = "sk-proj-vJwpU2k60PHhEDBrOE2mT3BlbkFJyPOz1v7GXAVXiox38eEQ"
 os.environ["GOOGLE_CSE_ID"] = "YOUR_GOOGLE_CSE_ID"
 os.environ["GOOGLE_API_KEY"] = "YOUR-GOOGLE-API-KEY"
 os.environ["TAVILY_API_KEY"] = "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"
@@ -73,6 +73,8 @@ class LangchainModel:
         self.model = None
         self.temperature = 0.1
         self.chain = None
+        self.result = None
+        self.results = None
         self.chat_history = []
 
     def documents_loader(self, data_path, data_types):
@@ -128,7 +130,8 @@ class LangchainModel:
         vector_store = self.chroma_embeddings(data_path, data_types, OllamaEmbeddings(model=self.model_type))
 
         # LLM init
-        llm = Ollama(model=self.model_type, callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+        self.llm = ChatOllama(model=self.model_type,
+                              callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
         # Conversational Memory Buffer
         memory = ConversationBufferMemory(
@@ -139,11 +142,11 @@ class LangchainModel:
 
         prompt_template = PromptTemplate(
             input_variables=["context", "question", "chat_history"],
-            template=self.retrieval_prompt,
+            template=get_prompt("retrieval"),
         )
 
         self.chain = ConversationalRetrievalChain.from_llm(
-            llm,
+            self.llm,
             memory=memory,
             retriever=vector_store.as_retriever(),
             combine_docs_chain_kwargs={
@@ -178,7 +181,6 @@ class LangchainModel:
         """
         Embed documents into chunks based on the model type.
         """
-
         if self.model_type == "gpt-4-vision":
             # Load chroma
             multi_modal_vectorstore = Chroma(
@@ -201,6 +203,7 @@ class LangchainModel:
                     | model
                     | StrOutputParser()
             )
+
         elif self.model_type == "agentic_rag":
             vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
@@ -221,12 +224,14 @@ class LangchainModel:
             # initialize Adaptive RAG
             self.chain = AdaptiveRAG(vector_db.as_retriever())
             self.chain.create_graph()
+
         if self.model_type == "code_assistant":
             # Chroma Vectorstore
             vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
             # initialize Adaptive RAG
             self.chain = CodeAssistant(vector_db.as_retriever())
             self.chain.create_graph()
+
         if self.model_type == "agent_gpt":
             vector_db = self.chroma_embeddings(data_path, data_types, OpenAIEmbeddings())
 
@@ -266,7 +271,8 @@ class LangchainModel:
             #                                              self.openai_functions_prompt)
 
             # Create ReAct Agent
-            react_agent = create_react_agent(ChatOpenAI(temperature=0), tools, get_prompt("react"))
+            react_agent = create_react_agent(ChatOpenAI(temperature=0, streaming=True, model="gpt-4"), tools,
+                                             get_prompt("react"))
 
             # Create self-ask search Agent
             self_ask_agent = create_self_ask_with_search_agent(ChatOpenAI(temperature=0), [
@@ -274,7 +280,7 @@ class LangchainModel:
 
             self.chain = AgentExecutor(
                 agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
-                return_intermediate_steps=True
+                return_intermediate_steps=True, include_run_info=True
             )
 
         elif self.model_type == "gpt-3.5":
@@ -293,7 +299,7 @@ class LangchainModel:
             )
 
             self.chain = ConversationalRetrievalChain.from_llm(
-                ChatOpenAI(temperature=self.temperature, model_name="gpt-3.5-turbo"),
+                ChatOpenAI(temperature=self.temperature, streaming=True, model_name="gpt-3.5-turbo"),
                 retriever=vector_db.as_retriever(),
                 return_source_documents=False,
                 memory=memory,
@@ -301,11 +307,13 @@ class LangchainModel:
                 get_chat_history=lambda h: h,
                 verbose=True
             )
-        elif self.model_type == "mixtral_agent":
-            vector_db = self.chroma_embeddings(data_path, data_types, OllamaEmbeddings(model="mixtral"))
+
+        elif self.model_type == "llama_agent":
+            vector_db = self.chroma_embeddings(data_path, data_types, OllamaEmbeddings(model="llama3"))
 
             # Ollama init
-            llm = ChatOllama(model='mixtral', callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+            self.llm = ChatOllama(model='llama3:70b', streaming=True,
+                                  callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
             # Conversational Memory Buffer
             conv_memory = ConversationBufferMemory(
@@ -323,14 +331,15 @@ class LangchainModel:
             tools = [retriever_tool, search_tool]
 
             # Create ReAct Agent
-            react_agent = create_react_agent(llm, tools, get_prompt("react"))
+            react_agent = create_react_agent(self.llm, tools, get_prompt("react"))
 
             self.chain = AgentExecutor(
                 agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
-                return_intermediate_steps=True
+                return_intermediate_steps=True, include_run_info=True
             )
-        elif self.model_type == self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r":
+        elif self.model_type == self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r" or self.model_type == "llama3:70b":
             self.ollama_chain_init(data_path, data_types)
+
         elif self.model_type == "bakllava":
             # Load chroma
             multi_modal_vectorstore = Chroma(
@@ -342,7 +351,8 @@ class LangchainModel:
             )
 
             # LLM init
-            model = Ollama(model=self.model_type, callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+            self.llm = Ollama(model=self.model_type,
+                              callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
             # Define the RAG pipeline
             self.chain = (
@@ -351,7 +361,7 @@ class LangchainModel:
                         "question": RunnablePassthrough(),
                     }
                     | RunnableLambda(img_prompt_func)
-                    | model
+                    | self.llm
                     | StrOutputParser()
             )
 
@@ -359,23 +369,25 @@ class LangchainModel:
         """
         Perform inference based on the query input and the model type.
         """
-        if self.model_type == "agent_gpt" or self.model_type == "mixtral_agent":
-            self.result = self.chain.invoke({"input": query_input, "chat_history": self.chat_history})
+        if self.model_type == "agent_gpt" or self.model_type == "llama_agent":
+            self.result = self.chain.invoke({"input": query_input, "chat_history": self.chat_history}, include_run_info=True)
             self.results = self.result["output"]
             self.chat_history.append((query_input, self.results))
         elif self.model_type == "gpt-3.5":
-            result = self.chain({"question": query_input, "chat_history": self.chat_history})
-            self.results = result["answer"]
+            self.result = self.chain({"question": query_input, "chat_history": self.chat_history},
+                                     include_run_info=True)
+            self.results = self.result["answer"]
+            self.result["output"] = self.results
             self.chat_history.append((query_input, self.results))
-        elif self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r":
+        elif self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "llama3:70b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r":
             self.results = self.chain.run({"question": query_input})
             self.chat_history.append((query_input, self.results))
         elif self.model_type == "gpt-4-vision" or self.model_type == "bakllava":
-            self.result = self.chain.invoke({"question": query_input})
+            self.results = self.chain.invoke({"question": query_input})
         elif self.model_type == "agentic_rag" or self.model_type == "adaptive_rag" or self.model_type == "code_assistant":
             self.chain.invoke(query_input)
         print(self.results)
-        return self.results
+        return self.results, self.result
 
 
 def parse_arguments():
@@ -385,11 +397,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
     parser.add_argument('--directory', default='./data', help='Ingesting files Directory')
     parser.add_argument('--model_type',
-                        choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama-7b", "gemma", "mixtral",
-                                 "bakllava", "mixtral_agent", "command-r", "agentic_rag", "adaptive_rag",
+                        choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama3-70b", "llama:7b", "gemma",
+                                 "mixtral",
+                                 "bakllava", "llama_agent", "command-r", "agentic_rag", "adaptive_rag",
                                  "code_assistant"],
-                        default='agentic_rag', help='Model type for processing')
-    parser.add_argument('--file_formats', nargs='+', default=['txt', 'pdf'],
+                        default="agent_gpt", help='Model type for processing')
+    parser.add_argument('--file_formats', nargs='+', default=['pdf'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
     return args.directory, args.model_type, args.file_formats
