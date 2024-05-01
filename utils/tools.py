@@ -7,7 +7,7 @@ from langchain.agents import AgentExecutor, create_openai_tools_agent, create_op
     Tool, ZeroShotAgent, load_huggingface_tool
 from langchain_community.tools import DuckDuckGoSearchResults, DuckDuckGoSearchRun
 from langchain.chains import ConversationalRetrievalChain, RetrievalQA
-from langchain.tools import WikipediaQueryRun
+from langchain_community.tools import WikipediaQueryRun
 import os
 
 os.environ["GOOGLE_CSE_ID"] = ""
@@ -38,7 +38,7 @@ def vectorstore_retriever_tool(title, vector_db):
 
 
 def create_search_tool(engine):
-    engine = engine.to_lower()
+    engine = engine.lower()
     if engine == 'google':
         # Google Search API tool initialization
         return Tool(
