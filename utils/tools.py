@@ -10,8 +10,9 @@ from langchain.chains import ConversationalRetrievalChain, RetrievalQA
 from langchain_community.tools import WikipediaQueryRun
 import os
 
-os.environ["GOOGLE_CSE_ID"] = ""
-os.environ["GOOGLE_API_KEY"] = ""
+os.environ["GOOGLE_CSE_ID"] = "YOUR_GOOGLE_CSE_ID"
+os.environ["GOOGLE_API_KEY"] = "YOUR-GOOGLE-API-KEY"
+os.environ["TAVILY_API_KEY"] = "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"
 os.environ["BING_SUBSCRIPTION_KEY"] = "<key>"
 os.environ["BING_SEARCH_URL"] = "https://api.bing.microsoft.com/v7.0/search"
 
@@ -47,7 +48,7 @@ def create_search_tool(engine):
             description="useful for when you need to answer questions about current events",
         )
     elif engine == "duckduckgo":
-        # Arxiv Search API tool initialization
+        # DuckDuckGo Search API tool initialization
         return Tool(
             name="Search",
             func=ArxivAPIWrapper().run,
@@ -55,7 +56,7 @@ def create_search_tool(engine):
         )
 
     elif engine == "bing":
-        # DuckDuckGo Search API tool initialization
+        # Bing Search API tool initialization
         return Tool(
             name="Search",
             func=DuckDuckGoSearchResults().run,

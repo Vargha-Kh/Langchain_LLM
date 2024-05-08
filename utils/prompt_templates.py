@@ -27,10 +27,23 @@ conversation_prompt = """You are an assistant for question-answering tasks, Use 
            Human: {question}
            AI:"""
 
-summary_prompt = """This is a conversation between a human and a bot:
+summary_prompt = """ This is a conversation between a human and a bot:
            {chat_history}
            Write a summary of the conversation for {input}:
            """
+
+visa_prompt = """ You are an AI assistant specialized in Australia visa and immigration topics. Utilize the provided context to answer the questions accurately, explain specifically not general, precise and give practical answer. If the answer is unknown, clearly state that you do not know. Do not fabricate responses. Use references in your responses. If you dont have sufficient data to answer, simply ask the user to get the information.
+        Previous Interactions:
+        {chat_history}
+        
+        Relevant Context:
+        {context}
+        
+        Question:
+        {question}
+        
+        Helpful Answer:
+        """
 
 prompts_dictionary = {
     "openai_tools": openai_tools_prompt,
@@ -41,7 +54,8 @@ prompts_dictionary = {
     "react": react_prompt,
     "conversation": conversation_prompt,
     "summary": summary_prompt,
-    "retrieval":retrieval_prompt
+    "retrieval": retrieval_prompt,
+    "visa": visa_prompt,
 }
 
 
