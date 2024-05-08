@@ -61,13 +61,13 @@ class AgenticRAG:
         last_message = messages[-1]
 
         # If there is no function call, then we finish
-        if "function_call" not in last_message.additional_kwargs:
-            print("---DECISION: DO NOT RETRIEVE / DONE---")
-            return "end"
-        # Otherwise there is a function call, so we continue
-        else:
-            print("---DECISION: RETRIEVE---")
-            return "continue"
+        # if "function_call" not in last_message.additional_kwargs:
+        #     print("---DECISION: DO NOT RETRIEVE / DONE---")
+        #     return "end"
+        # # Otherwise there is a function call, so we continue
+        # else:
+        print("---DECISION: RETRIEVE---")
+        return "continue"
 
     @staticmethod
     def grade_documents(state):
@@ -213,6 +213,7 @@ class AgenticRAG:
         {question} 
         \n ------- \n
         Formulate an improved question: """,
+            additional_kwargs={}
         )]
 
         # Grader
@@ -233,7 +234,6 @@ class AgenticRAG:
         """
         print("---GENERATE---")
         messages = state["messages"]
-        question = messages[0].content
         last_message = messages[-1]
 
         question = messages[0].content
@@ -243,7 +243,7 @@ class AgenticRAG:
         prompt = hub.pull("rlm/rag-prompt")
 
         # LLM
-        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0, streaming=True)
+        llm = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=0, streaming=True)
 
         # Post-processing
         def format_docs(docs):
@@ -298,10 +298,12 @@ class AgenticRAG:
         self.app = workflow.compile()
 
     def invoke(self, input_query):
+        output_response = str
         inputs = {
             "messages": [
                 HumanMessage(
-                    content=input_query
+                    content=input_query,
+                    additional_kwargs={"function_call":True}
                 )
             ]
         }
@@ -310,4 +312,6 @@ class AgenticRAG:
                 pprint.pprint(f"Output from node '{key}':")
                 pprint.pprint("---")
                 pprint.pprint(value, indent=2, width=80, depth=None)
+                output_response += str(value['messages'][0].content)
             pprint.pprint("\n---\n")
+        return output_response

@@ -63,8 +63,7 @@ class AdaptiveRAG:
         self.web_search_tool = TavilySearchResults(k=3)
         self.app = None
         # LLM with function call
-        llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
-
+        llm = ChatOpenAI(model="gpt-4-turbo", temperature=0)
         # Router
         structured_llm_router = llm.with_structured_output(RouteQuery)
 
