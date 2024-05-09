@@ -65,7 +65,7 @@ class AdaptiveRAG:
         # LLM with function call
         llm = ChatOpenAI(model="gpt-4-turbo", temperature=0)
         # Router
-        structured_llm_router = llm.with_structured_output(RouteQuery)
+        structured_llm_router = llm.with_structured_output(RouteQuery, method="function_calling")
 
         # Prompt
         system = """You are an expert at routing a user question to a vectorstore or web search.

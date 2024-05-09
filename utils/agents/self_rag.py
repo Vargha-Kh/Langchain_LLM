@@ -57,7 +57,7 @@ class SelfRAG:
     def __init__(self, retriever):
         self.app = None
         self.retriever = retriever
-        llm = ChatOpenAI(model="gpt-3.5-turbo-0125", temperature=0)
+        llm = ChatOpenAI(model="gpt-4-0125-preview", temperature=0, streaming=True)
 
         ### Retrieval Grader
         # LLM with function call
