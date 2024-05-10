@@ -4,7 +4,7 @@ chromadb
 tiktoken
 unstructured
 typing-inspect==0.8.0 
-typing_extensions==4.5.0
+typing_extensions
 openapi-schema-pydantic==1.2.4
 pydantic==1.10.8
 python-telegram-bot
@@ -13,3 +13,10 @@ langchain-experimental
 langchain_openai 
 langchainhub
 streamlit
+open_clip_torch
+faiss-cpu
+qdrant-client
+pymilvus
+langchain-weaviate
+langchain-chroma
+langchain-anthropic
