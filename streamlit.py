@@ -6,14 +6,11 @@ from langchain.agents.openai_functions_agent.agent_token_buffer_memory import (
 )
 from langchain.chains.conversation.memory import ConversationBufferMemory
 from rags import LangchainModel
-from langchain_community.chat_models import ChatOpenAI
-from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.callbacks import StreamlitCallbackHandler
 from langchain.schema import SystemMessage, AIMessage, HumanMessage
 from langchain.prompts import MessagesPlaceholder
 from langsmith import Client
 
-os.environ["LANGCHAIN_API_KEY"] = "ls__12ea7979a9254bc7b7a4a0f40ec62356"
 
 client = Client()
 
@@ -31,13 +28,13 @@ def parse_arguments():
     Parse command line arguments.
     """
     parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
-    parser.add_argument('--directory', default='./data', help='Ingesting files Directory')
+    parser.add_argument('--directory', default='./visa_data', help='Ingesting files Directory')
     parser.add_argument('--model_type',
-                        choices=['agent_gpt', 'gpt-3.5', 'gpt-4-vision', 'mistral', "llama3-70b", "llama:7b", "gemma",
+                        choices=['react_agent', 'gpt-4', 'gpt-4-vision', 'mistral', "llama3-70b", "llama:7b", "gemma",
                                  "mixtral", "bakllava", "llama_agent", "command-r", "agentic_rag", "adaptive_rag",
                                  "code_assistant"],
-                        default="agent_gpt", help='Model type for processing')
-    parser.add_argument('--file_formats', nargs='+', default=['pdf'],
+                        default="gpt-4", help='Model type for processing')
+    parser.add_argument('--file_formats', nargs='+', default=['pdf', 'txt'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
     return args.directory, args.model_type, args.file_formats
