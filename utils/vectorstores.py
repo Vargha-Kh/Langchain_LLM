@@ -11,6 +11,9 @@ from langchain_experimental.open_clip import OpenCLIPEmbeddings
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Milvus
 import weaviate
+from langchain_community.vectorstores import Vectara
+from langchain_community.vectorstores import OpenSearchVectorSearch
+from langchain_elasticsearch import ElasticsearchStore
 from langchain_community.vectorstores import FAISS
 from langchain_pinecone import PineconeVectorStore
 from langchain_community.vectorstores import Qdrant
@@ -130,11 +133,36 @@ def faiss_embeddings(data_path, data_types, embedding_function, create_db):
     return FAISS.from_documents(docstore, embedding_function)
 
 
-def gpt_vision_embeddings(data_path):
+def elasticsearch_embeddings(data_path, data_types, embedding_function, create_db):
+    docstore = documents_loader(data_path, data_types)
+    return ElasticsearchStore.from_documents(
+        docstore,
+        embedding_function,
+        es_url="http://localhost:9200",
+        index_name="rag",
+    )
+
+
+def opensearch_embeddings(data_path, data_types, embedding_function, create_db):
+    docstore = documents_loader(data_path, data_types)
+    return OpenSearchVectorSearch.from_documents(
+        docstore, embedding_function, opensearch_url="http://localhost:9200"
+    )
+
+
+def openclip_embeddings(data_path):
     return Chroma(
         collection_name="multi-modal-rag",
         persist_directory=data_path,
         embedding_function=OpenCLIPEmbeddings(
             model_name="ViT-H-14", checkpoint="laion2b_s32b_b79k"
         )
+    )
+
+
+def vectara_embeddings(data_path, data_types, embedding_function, create_db):
+    docstore = documents_loader(data_path, data_types)
+    return Vectara.from_documents(
+        documents=docstore,
+        embedding=embedding_function,
     )
