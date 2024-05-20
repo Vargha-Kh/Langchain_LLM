@@ -1,8 +1,9 @@
+import glob
 import os
 from bs4 import BeautifulSoup as Soup
 from chromadb.errors import InvalidDimensionException
 from langchain_community.document_loaders import TextLoader, DirectoryLoader, PyPDFDirectoryLoader, PythonLoader, \
-    UnstructuredURLLoader, CSVLoader, UnstructuredCSVLoader, GitLoader, RecursiveUrlLoader
+    UnstructuredURLLoader, CSVLoader, UnstructuredCSVLoader, GitLoader, RecursiveUrlLoader, PDFPlumberLoader
 from langchain_community.document_loaders.recursive_url_loader import RecursiveUrlLoader
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
@@ -34,6 +35,10 @@ def documents_loader(data_path, data_types):
                                      use_multithreading=True)
         elif data_type == "pdf":
             loader = PyPDFDirectoryLoader(data_path)
+        elif data_type == "pdf_plumber":
+            for file_path in glob.glob(os.path.join(data_path, "*.pdf"), recursive=True):
+                loader = PDFPlumberLoader(file_path, extract_images=True)
+                all_texts.extend(loader.load_and_split())
         elif data_type == "url":
             urls = []
             with open(os.path.join(data_path, 'urls.txt'), 'r') as file:
@@ -67,12 +72,11 @@ def documents_loader(data_path, data_types):
             )
 
         if loader is not None:
-            splitted_texts = loader.load_and_split(text_splitter)
-            # if data_type == "txt":
-            #     all_texts.extend(texts[0])
-            # else:
-            #     all_texts.extend(texts)
-            all_texts.extend(splitted_texts)
+            if data_type == "pdf_plumber":
+                all_texts = all_texts
+            else:
+                splitted_texts = loader.load_and_split(text_splitter)
+                all_texts.extend(splitted_texts)
         else:
             raise ValueError("Data file format is Not correct")
     return all_texts
