@@ -10,7 +10,7 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolInvocation, ToolExecutor
+from langgraph.prebuilt import ToolInvocation, ToolExecutor, ToolNode, tools_condition
 from langchain_core.messages import BaseMessage
 from typing import Annotated, Sequence, TypedDict, List, Literal
 import operator
@@ -37,7 +37,8 @@ class GraphState(TypedDict):
 class AgenticRAG:
     def __init__(self, retriever_tool):
         self.app = None
-        self.tools = [retriever_tool]
+        self.retriever_tool = retriever_tool
+        self.tools = [self.retriever_tool]
         self.tool_executor = ToolExecutor(self.tools)
 
     ## Edges
@@ -160,35 +161,6 @@ class AgenticRAG:
         # We return a list, because this will get added to the existing list
         return {"messages": [response]}
 
-    def retrieve(self, state):
-        """
-        Uses tool to execute retrieval.
-
-        Args:
-            state (messages): The current state
-
-        Returns:
-            dict: The updated state with retrieved docs
-        """
-        print("---EXECUTE RETRIEVAL---")
-        messages = state["messages"]
-        # Based on the continue condition
-        # we know the last message involves a function call
-        last_message = messages[-1]
-        # We construct an ToolInvocation from the function_call
-        action = ToolInvocation(
-            tool=last_message.additional_kwargs["function_call"]["name"],
-            tool_input=json.loads(
-                last_message.additional_kwargs["function_call"]["arguments"]
-            ),
-        )
-        # We call the tool_executor and get back a response
-        response = self.tool_executor.invoke(action)
-        function_message = FunctionMessage(content=str(response), name=action.tool)
-
-        # We return a list, because this will get added to the existing list
-        return {"messages": [function_message]}
-
     @staticmethod
     def rewrite(state):
         """
@@ -243,7 +215,7 @@ class AgenticRAG:
         prompt = hub.pull("rlm/rag-prompt")
 
         # LLM
-        llm = ChatOpenAI(model_name="gpt-4-0125-preview", temperature=0, streaming=True)
+        llm = ChatOpenAI(model_name="gpt-4o", temperature=0, streaming=True)
 
         # Post-processing
         def format_docs(docs):
@@ -262,7 +234,8 @@ class AgenticRAG:
 
         # Define the nodes we will cycle between
         workflow.add_node("agent", self.agent)  # agent
-        workflow.add_node("retrieve", self.retrieve)  # retrieval
+        retrieve = ToolNode([self.retriever_tool])
+        workflow.add_node("retrieve", retrieve)  # retrieval
         workflow.add_node("rewrite", self.rewrite)  # retrieval
         workflow.add_node("generate", self.generate)  # retrieval
 
@@ -273,11 +246,11 @@ class AgenticRAG:
         workflow.add_conditional_edges(
             "agent",
             # Assess agent decision
-            self.should_retrieve,
+            tools_condition,
             {
-                # Call tool node
-                "continue": "retrieve",
-                "end": END,
+                # Translate the condition outputs to nodes in our graph
+                "tools": "retrieve",
+                END: END,
             },
         )
 
@@ -298,12 +271,12 @@ class AgenticRAG:
         self.app = workflow.compile()
 
     def invoke(self, input_query):
-        output_response = str
+        output_response = ""
         inputs = {
             "messages": [
                 HumanMessage(
                     content=input_query,
-                    additional_kwargs={"function_call":True}
+                    additional_kwargs={"function_call": True}
                 )
             ]
         }
@@ -311,7 +284,7 @@ class AgenticRAG:
             for key, value in output.items():
                 pprint.pprint(f"Output from node '{key}':")
                 pprint.pprint("---")
-                pprint.pprint(value, indent=2, width=80, depth=None)
+                # pprint.pprint(value, indent=2, width=80, depth=None)
                 output_response += str(value['messages'][0].content)
-            pprint.pprint("\n---\n")
+            # pprint.pprint("\n---\n")
         return output_response
