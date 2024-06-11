@@ -213,6 +213,18 @@ class AgenticRAG:
 
         # Prompt
         prompt = hub.pull("rlm/rag-prompt")
+        visa_prompt = """ You are an AI assistant specialized in Australia visa and immigration topics. Utilize the provided context to answer the questions accurately, explain specifically not general, precise and give practical answer. If the answer is unknown, clearly state that you do not know. Do not fabricate responses. Use references in your responses. If you dont have sufficient data to answer, simply ask the user to get the information.
+                Previous Interactions:
+                {chat_history}
+
+                Relevant Context:
+                {context}
+
+                Question:
+                {question}
+
+                Helpful Answer:
+                """
 
         # LLM
         llm = ChatOpenAI(model_name="gpt-4o", temperature=0, streaming=True)
