@@ -7,17 +7,13 @@ from langchain_community.document_loaders import TextLoader, DirectoryLoader, Py
 from langchain_community.document_loaders.recursive_url_loader import RecursiveUrlLoader
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma, Neo4jVector, Vectara, Qdrant, ElasticsearchStore, FAISS, Milvus, \
+    OpenSearchVectorSearch
 from langchain_experimental.open_clip import OpenCLIPEmbeddings
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Milvus
 import weaviate
-from langchain_community.vectorstores import Vectara
-from langchain_community.vectorstores import OpenSearchVectorSearch
 from langchain_elasticsearch import ElasticsearchStore
-from langchain_community.vectorstores import FAISS
 from langchain_pinecone import PineconeVectorStore
-from langchain_community.vectorstores import Qdrant
 from langchain_weaviate.vectorstores import WeaviateVectorStore
 
 
@@ -37,7 +33,7 @@ def documents_loader(data_path, data_types):
             loader = PyPDFDirectoryLoader(data_path)
         elif data_type == "pdf_plumber":
             for file_path in glob.glob(os.path.join(data_path, "*.pdf"), recursive=True):
-                loader = PDFPlumberLoader(file_path, extract_images=True)
+                loader = PDFPlumberLoader(file_path)
                 all_texts.extend(loader.load_and_split())
         elif data_type == "url":
             urls = []
@@ -122,6 +118,7 @@ def qdrant_embeddings(data_path, data_types, embedding_function, create_db):
         docstore,
         embedding_function,
         path=data_path,
+        force_recreate=True,
         collection_name=f"{data_path}",
     )
 
@@ -170,3 +167,17 @@ def vectara_embeddings(data_path, data_types, embedding_function, create_db):
         documents=docstore,
         embedding=embedding_function,
     )
+
+
+def neo4j_embeddings(data_path, data_types, embedding_function, create_db):
+    docstore = documents_loader(data_path, data_types)
+    if create_db:
+        return Neo4jVector.from_documents(
+            docstore, embedding_function
+        )
+    else:
+        index_name = "vector"  # default index name
+        return Neo4jVector.from_existing_index(
+            embedding_function,
+            index_name=index_name,
+        )
