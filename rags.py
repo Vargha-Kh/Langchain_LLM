@@ -24,16 +24,16 @@ from langchain_openai import ChatOpenAI, OpenAI, OpenAIEmbeddings
 from langchain_voyageai import VoyageAIEmbeddings
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_elasticsearch import ElasticsearchEmbeddings
-from utils import get_resized_images, img_prompt_func, AgenticRAG, AdaptiveRAG, CodeAssistant, \
+from utils import get_resized_images, img_prompt_func, AgenticRAG, AdaptiveRAG, CRAG, CodeAssistant, \
     get_prompt, SelfRAG, chroma_embeddings, milvus_embeddings, pinecone_embeddings, openclip_embeddings, \
-    faiss_embeddings, qdrant_embeddings, create_retriever_tool
+    faiss_embeddings, qdrant_embeddings, elasticsearch_embeddings, vectara_embeddings, create_retriever_tool
 from utils.tools import *
+from elasticsearch import Elasticsearch
 
 warnings.filterwarnings("ignore")
 
 # Set API Keys
 # os.environ["OPENAI_API_KEY"] = getpass.getpass("Your OpenAI API key: ")
-
 
 
 class LangchainModel:
@@ -43,7 +43,10 @@ class LangchainModel:
 
     def __init__(self, llm_model):
         """
-            Class to handle interactions with different types of language models provided by Langchain.
+        Initialize the LangchainModel class with the specified LLM model type.
+
+        Args:
+            llm_model (str): The type of LLM model to use.
         """
         self.loader = None
         self.llm = OpenAI()
@@ -58,314 +61,415 @@ class LangchainModel:
         self.chat_history = []
         self.create_db = True
 
-    def ollama_chain_init(self, data_path, data_types):
-        vector_store = qdrant_embeddings(data_path, data_types, OllamaEmbeddings(model=self.model_type),
-                                         self.create_db)
+    def model_chain_init(self, data_path, data_types):
+        """
+        Initialize the model chain based on the specified model type.
 
-        # LLM init
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        if self.model_type == "agentic_rag":
+            self._init_agentic_rag_chain(data_path, data_types)
+        elif self.model_type == "adaptive_rag":
+            self._init_adaptive_rag_chain(data_path, data_types)
+        elif self.model_type == "crag":
+            self._init_crag_chain(data_path, data_types)
+        elif self.model_type == "self_rag":
+            self._init_self_rag_chain(data_path, data_types)
+        elif self.model_type == "code_assistant":
+            self._init_code_assistant_chain(data_path, data_types)
+        elif self.model_type == "react_agent":
+            self._init_react_agent_chain(data_path, data_types)
+        elif self.model_type == "gpt-4":
+            self._init_gpt4_chain(data_path, data_types)
+        elif self.model_type == "gpt-4o":
+            self._init_gpt4o_chain(data_path, data_types)
+        elif self.model_type == "claude":
+            self._init_claude_chain(data_path, data_types)
+        elif self.model_type == "mixtral_agent":
+            self._init_mixtral_agent_chain(data_path, data_types)
+        elif self.model_type in ["mistral", "llama:7b", "llama3:70b", "gemma", "mixtral", "command-r"]:
+            self.ollama_chain_init(data_path, data_types)
+        elif self.model_type == "bakllava":
+            self._init_bakllava_chain(data_path)
+        elif self.model_type == "gpt-4-vision":
+            self._init_gpt4_vision_chain(data_path)
+
+    def ollama_chain_init(self, data_path, data_types):
+        """
+        Initialize the Ollama chain with Qdrant embeddings.
+
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        vector_store = qdrant_embeddings(data_path, data_types, OllamaEmbeddings(model=self.model_type), self.create_db)
+
+        # Initialize the LLM
         self.llm = ChatOllama(model=self.model_type, streaming=True,
                               callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
-        # Conversational Memory Buffer
-        memory = ConversationBufferMemory(
-            memory_key="chat_history", input_key="question", return_messages=False
-        )
-        # Knowledge Graph Memory
-        # kg_memory = ConversationKGMemory(llm=llm)
+        # Initialize conversational memory
+        memory = ConversationBufferMemory(memory_key="chat_history", input_key="question", return_messages=False)
 
-        prompt_template = PromptTemplate(
-            input_variables=["context", "question", "chat_history"],
-            template=get_prompt("retrieval"),
-        )
+        # Define the prompt template
+        prompt_template = PromptTemplate(input_variables=["context", "question", "chat_history"],
+                                         template=get_prompt("retrieval"))
 
+        # Create the conversational retrieval chain
         self.chain = ConversationalRetrievalChain.from_llm(
             self.llm,
             memory=memory,
             retriever=vector_store.as_retriever(),
-            combine_docs_chain_kwargs={
-                "prompt": prompt_template,
-            },
+            combine_docs_chain_kwargs={"prompt": prompt_template},
             get_chat_history=lambda h: h,
             verbose=True
         )
 
-    def model_chain_init(self, data_path, data_types):
+    def _init_agentic_rag_chain(self, data_path, data_types):
         """
-        Embed documents into chunks based on the model type.
+        Initialize the AgenticRAG chain.
+
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
         """
-        if self.model_type == "gpt-4-vision":
-            # Load chroma
-            multi_modal_vectorstore = openclip_embeddings(data_path)
-            # Initialize the multi-modal Large Language Model with specific parameters
-            model = ChatOpenAI(temperature=0, model="gpt-4-vision-preview", max_tokens=1024)
+        # Initialize vector database with embeddings
+        vector_db = milvus_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-            # Define the RAG pipeline
-            self.chain = (
-                    {
-                        "context": multi_modal_vectorstore.as_retriever | RunnableLambda(get_resized_images),
-                        "question": RunnablePassthrough(),
-                    }
-                    | RunnableLambda(img_prompt_func)
-                    | model
-                    | StrOutputParser()
-            )
+        # Create a retriever tool for the agent
+        retriever_tool = create_retriever_tool(vector_db.as_retriever(), f"{os.path.basename(data_path)}",
+                                               f"Searches and returns answers from {os.path.basename(data_path)} document.")
 
-        elif self.model_type == "agentic_rag":
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        # Initialize AgenticRAG chain with the retriever tool
+        self.chain = AgenticRAG(retriever_tool)
+        self.chain.create_graph()
 
-            # Agent's tools initialization for retrievers
-            retriever_tool = create_retriever_tool(
-                vector_db.as_retriever(),
-                f"{os.path.basename(data_path)}",
-                f"Searches and returns answers from {os.path.basename(data_path)} document.",
-            )
+    def _init_adaptive_rag_chain(self, data_path, data_types):
+        """
+        Initialize the AdaptiveRAG chain.
 
-            # initialize AgenticRAG graphs
-            self.chain = AgenticRAG(retriever_tool)
-            self.chain.create_graph()
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-        if self.model_type == "adaptive_rag":
-            # Chroma Vectorstore
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
-            # initialize Adaptive RAG
-            self.chain = AdaptiveRAG(vector_db.as_retriever())
-            self.chain.create_graph()
+        # Initialize AdaptiveRAG chain with the retriever tool
+        self.chain = AdaptiveRAG(vector_db.as_retriever())
+        self.chain.create_graph()
 
-        if self.model_type == "self_rag":
-            # Chroma Vectorstore
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
-            # initialize Adaptive RAG
-            self.chain = SelfRAG(vector_db.as_retriever())
-            self.chain.create_graph()
+    def _init_crag_chain(self, data_path, data_types):
+        """
+        Initialize the CRAG chain.
 
-        if self.model_type == "code_assistant":
-            # Chroma Vectorstore
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
-            # initialize Adaptive RAG
-            self.chain = CodeAssistant(vector_db.as_retriever())
-            self.chain.create_graph()
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-        if self.model_type == "react_agent":
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        # Initialize CRAG chain with the retriever tool
+        self.chain = CRAG(vector_db.as_retriever())
+        self.chain.create_graph()
 
-            # Conversational Memory Buffer
-            conv_memory = ConversationBufferMemory(
-                memory_key="chat_history", input_key="input"
-            )
+    def _init_self_rag_chain(self, data_path, data_types):
+        """
+        Initialize the SelfRAG chain.
 
-            # Summary Memory Module
-            prompt_template = PromptTemplate(input_variables=["input", "chat_history"], template=get_prompt("summary"))
-            read_only_memory = ReadOnlySharedMemory(memory=conv_memory)
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-            summary_chain = LLMChain(
-                llm=self.llm,
-                prompt=prompt_template,
-                verbose=True,
-                memory=read_only_memory,  # use the read-only memory to prevent the tool from modifying the memory
-            )
+        # Initialize SelfRAG chain with the retriever tool
+        self.chain = SelfRAG(vector_db.as_retriever())
+        self.chain.create_graph()
 
-            # Define summary memory tool
-            summary_memory_tool = Tool(
-                name="Summary",
-                func=summary_chain.run,
-                description="useful for when you summarize a conversation. The input to this tool should be a string, representing who will read this summary.",
-            )
+    def _init_code_assistant_chain(self, data_path, data_types):
+        """
+        Initialize the CodeAssistant chain.
 
-            search_tool = create_search_tool("tavily")
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        # vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-            # Agent's tools initialization for retrievers
-            qa_retrieval_tool = retrieval_qa_tool(os.path.basename(data_path), vector_db, self.llm)
-            retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
+        # Initialize CodeAssistant chain with the retriever tool
+        self.chain = CodeAssistant()
+        self.chain.create_graph()
 
-            tools = [retriever_tool, search_tool, qa_retrieval_tool, summary_memory_tool]
+    def _init_react_agent_chain(self, data_path, data_types):
+        """
+        Initialize the ReAct agent chain.
 
-            # Create Openai function Agent
-            # openai_agent = create_openai_functions_agent(ChatOpenAI(model="gpt-3.5-turbo-1106"), tools,
-            #                                              self.openai_functions_prompt)
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-            # Create ReAct Agent
-            react_agent = create_react_agent(ChatOpenAI(temperature=0, streaming=True, model="gpt-4"), tools,
-                                             get_prompt("react"))
+        # Initialize conversation memory buffer
+        conv_memory = ConversationBufferMemory(memory_key="chat_history", input_key="input")
 
-            # Create self-ask search Agent
-            self_ask_agent = create_self_ask_with_search_agent(ChatOpenAI(temperature=0, streaming=True, model="gpt-4"),
-                                                               [
-                                                                   TavilyAnswer(max_results=1,
-                                                                                name="Intermediate Answer")],
-                                                               get_prompt("ask_search"))
+        # Define the prompt template for summary
+        prompt_template = PromptTemplate(input_variables=["input", "chat_history"], template=get_prompt("summary"))
 
-            self.chain = AgentExecutor(
-                agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
-                return_intermediate_steps=True, include_run_info=True
-            )
+        # Initialize read-only memory
+        read_only_memory = ReadOnlySharedMemory(memory=conv_memory)
 
-        elif self.model_type == "gpt-4":
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        # Create the summary chain
+        summary_chain = LLMChain(llm=self.llm, prompt=prompt_template, verbose=True, memory=read_only_memory)
 
-            # Conversational Memory Buffer
-            memory = ConversationBufferMemory(
-                memory_key="chat_history", return_messages=False
-            )
-            # Knowledge Graph Memory
-            # kg_memory = ConversationKGMemory(llm=self.llm)
+        # Define summary memory tool
+        summary_memory_tool = Tool(name="Summary", func=summary_chain.run,
+                                   description="Useful for summarizing a conversation. The input should be a string representing who will read this summary.")
 
-            prompt_template = PromptTemplate(
-                input_variables=["context", "question", "chat_history"],
-                template=get_prompt("visa"),
-            )
+        # Create search and retrieval tools
+        search_tool = create_search_tool("tavily")
+        qa_retrieval_tool = retrieval_qa_tool(os.path.basename(data_path), vector_db, self.llm)
+        retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
 
-            self.chain = ConversationalRetrievalChain.from_llm(
-                ChatOpenAI(temperature=self.temperature, streaming=True, model_name="gpt-4-turbo"),
-                retriever=vector_db.as_retriever(),
-                return_source_documents=False,
-                memory=memory,
-                combine_docs_chain_kwargs={"prompt": prompt_template},
-                get_chat_history=lambda h: h,
-                verbose=True
-            )
+        # Combine all tools for the agent
+        tools = [retriever_tool, search_tool, qa_retrieval_tool, summary_memory_tool]
 
-        elif self.model_type == "gpt-4o":
-            vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        # Create ReAct agent with the tools
+        react_agent = create_react_agent(ChatOpenAI(temperature=0, streaming=True, model="gpt-4"), tools,
+                                         get_prompt("react"))
 
-            # Define your prompt template
-            prompt = PromptTemplate(template=get_prompt("visa"), input_variables=["context", "question"])
+        # Initialize AgentExecutor with the ReAct agent
+        self.chain = AgentExecutor(agent=react_agent, tools=tools, memory=conv_memory, verbose=True,
+                                   handle_parsing_errors=True, return_intermediate_steps=True, include_run_info=True)
 
-            # Create an LLMChain with the prompt
-            llm_chain = LLMChain(llm=ChatOpenAI(temperature=self.temperature, streaming=True, model_name="gpt-4o"),
-                                 prompt=prompt)
+    def _init_gpt4_chain(self, data_path, data_types):
+        """
+        Initialize the GPT-4 chain.
 
-            # Create a RefineDocumentsChain as the combine_docs_chain
-            combine_docs_chain = RefineDocumentsChain(
-                initial_llm_chain=llm_chain,
-                refine_llm_chain=llm_chain,
-                document_variable_name="context",
-                initial_response_name="initial_answer",
-            )
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = qdrant_embeddings(data_path, data_types, FastEmbedEmbeddings(), self.create_db)
 
-            # Conversational Memory Buffer
-            memory = ConversationBufferMemory(
-                memory_key="chat_history", return_messages=False, output_key="answer"
-            )
+        # Initialize conversation memory buffer
+        memory = ConversationBufferMemory(memory_key="chat_history", return_messages=False)
 
-            prompt_template = PromptTemplate(
-                input_variables=["context", "question", "chat_history"],
-                template=get_prompt("visa"),
-            )
+        # Define the prompt template
+        prompt_template = PromptTemplate(input_variables=["context", "question", "chat_history"],
+                                         template=get_prompt("visa"))
 
-            llm = ChatOpenAI(temperature=self.temperature, streaming=True, model_name="gpt-4o")
+        # Create the conversational retrieval chain with GPT-4
+        self.chain = ConversationalRetrievalChain.from_llm(
+            ChatOpenAI(temperature=self.temperature, streaming=True, model_name="gpt-4-turbo"),
+            retriever=vector_db.as_retriever(),
+            return_source_documents=False,
+            memory=memory,
+            combine_docs_chain_kwargs={"prompt": prompt_template},
+            get_chat_history=lambda h: h,
+            verbose=True
+        )
 
-            self.chain = RetrievalQAWithSourcesChain(
-                combine_documents_chain=combine_docs_chain,
-                memory=memory,
-                retriever=vector_db.as_retriever(),
-                return_source_documents=True,
-                verbose=True,
-            )
+    def _init_gpt4o_chain(self, data_path, data_types):
+        """
+        Initialize the GPT-4o chain.
 
-        elif self.model_type == "claude":
-            vector_db = milvus_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = elasticsearch_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-            # LLM definition
-            llm = ChatAnthropic(model="claude-3-opus-20240229", streaming=True)
-            # Conversational Memory Buffer
-            memory = ConversationBufferMemory(
-                memory_key="chat_history", return_messages=False
-            )
-            # Knowledge Graph Memory
-            # kg_memory = ConversationKGMemory(llm=self.llm)
+        # Define the prompt template
+        prompt = PromptTemplate(template=get_prompt("visa"), input_variables=["context", "question"])
 
-            prompt_template = PromptTemplate(
-                input_variables=["context", "question", "chat_history"],
-                template=get_prompt("visa"),
-            )
+        # Create an LLMChain with the prompt
+        llm_chain = LLMChain(llm=ChatOpenAI(temperature=self.temperature, streaming=True, model_name=self.model_type),
+                             prompt=prompt)
 
-            self.chain = ConversationalRetrievalChain.from_llm(
-                llm,
-                retriever=vector_db.as_retriever(),
-                return_source_documents=False,
-                memory=memory,
-                combine_docs_chain_kwargs={"prompt": prompt_template},
-                get_chat_history=lambda h: h,
-                verbose=True
-            )
+        # Create a RefineDocumentsChain as the combine_docs_chain
+        combine_docs_chain = RefineDocumentsChain(
+            initial_llm_chain=llm_chain,
+            refine_llm_chain=llm_chain,
+            document_variable_name="context",
+            initial_response_name="initial_answer"
+        )
 
-        elif self.model_type == "mixtral_agent":
-            vector_db = chroma_embeddings(data_path, data_types, OllamaEmbeddings(model="mixtral"), self.create_db)
+        # Initialize conversation memory buffer
+        memory = ConversationBufferMemory(memory_key="chat_history", return_messages=False, output_key="answer")
 
-            # Ollama init
-            self.llm = ChatOllama(model='mixtral', streaming=True,
-                                  callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+        # Create the RetrievalQAWithSourcesChain with the refined document chain
+        self.chain = RetrievalQAWithSourcesChain(
+            combine_documents_chain=combine_docs_chain,
+            memory=memory,
+            retriever=vector_db.as_retriever(),
+            return_source_documents=True,
+            verbose=True
+        )
 
-            # Conversational Memory Buffer
-            conv_memory = ConversationBufferMemory(
-                memory_key="chat_history", input_key="input"
-            )
+    def _init_claude_chain(self, data_path, data_types):
+        """
+        Initialize the Claude chain.
 
-            # Summarization Memory
-            # summary_memory = ConversationSummaryMemory(llm=self.llm)
-            # Memory Modules Combined
-            # memory = CombinedMemory(memories=[conv_memory, summary_memory])
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = milvus_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
 
-            search_tool = create_search_tool(engine="arxiv")
-            retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
+        # Define the LLM for Claude
+        llm = ChatAnthropic(model="claude-3-opus-20240229", streaming=True)
 
-            tools = [retriever_tool, search_tool]
+        # Initialize conversation memory buffer
+        memory = ConversationBufferMemory(memory_key="chat_history", return_messages=False)
 
-            # Create ReAct Agent
-            react_agent = create_react_agent(self.llm, tools, get_prompt("react"))
+        # Define the prompt template
+        prompt_template = PromptTemplate(input_variables=["context", "question", "chat_history"],
+                                         template=get_prompt("visa"))
 
-            self.chain = AgentExecutor(
-                agent=react_agent, tools=tools, memory=conv_memory, verbose=True, handle_parsing_errors=True,
-                return_intermediate_steps=True, include_run_info=True
-            )
-        elif self.model_type == self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r" or self.model_type == "llama3:70b":
-            self.ollama_chain_init(data_path, data_types)
+        # Create the conversational retrieval chain with Claude
+        self.chain = ConversationalRetrievalChain.from_llm(
+            llm,
+            retriever=vector_db.as_retriever(),
+            return_source_documents=False,
+            memory=memory,
+            combine_docs_chain_kwargs={"prompt": prompt_template},
+            get_chat_history=lambda h: h,
+            verbose=True
+        )
 
-        elif self.model_type == "bakllava":
-            # Load chroma
-            multi_modal_vectorstore = openclip_embeddings(data_path)
+    def _init_mixtral_agent_chain(self, data_path, data_types):
+        """
+        Initialize the Mixtral agent chain.
 
-            # LLM init
-            self.llm = Ollama(model=self.model_type,
+        Args:
+            data_path (str): The path to the data directory.
+            data_types (list): The list of data types to process.
+        """
+        # Initialize vector database with embeddings
+        vector_db = chroma_embeddings(data_path, data_types, OllamaEmbeddings(model="mixtral"), self.create_db)
+
+        # Initialize Ollama LLM for Mixtral
+        self.llm = ChatOllama(model='mixtral', streaming=True,
                               callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
 
-            # Define the RAG pipeline
-            self.chain = (
-                    {
-                        "context": multi_modal_vectorstore.as_retriever | RunnableLambda(get_resized_images),
-                        "question": RunnablePassthrough(),
-                    }
-                    | RunnableLambda(img_prompt_func)
-                    | self.llm
-                    | StrOutputParser()
-            )
+        # Initialize conversation memory buffer
+        conv_memory = ConversationBufferMemory(memory_key="chat_history", input_key="input")
+
+        # Create search tool and retriever tool
+        search_tool = create_search_tool(engine="arxiv")
+        retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
+
+        # Combine tools for the agent
+        tools = [retriever_tool, search_tool]
+
+        # Create ReAct agent with the tools
+        react_agent = create_react_agent(self.llm, tools, get_prompt("react"))
+
+        # Initialize AgentExecutor with the ReAct agent
+        self.chain = AgentExecutor(agent=react_agent, tools=tools, memory=conv_memory, verbose=True,
+                                   handle_parsing_errors=True, return_intermediate_steps=True, include_run_info=True)
+
+    def _init_bakllava_chain(self, data_path):
+        """
+        Initialize the Bakllava chain.
+
+        Args:
+            data_path (str): The path to the data directory.
+        """
+        # Initialize multi-modal vector store with OpenCLIP embeddings
+        multi_modal_vectorstore = openclip_embeddings(data_path)
+
+        # Initialize the LLM with streaming callback
+        self.llm = Ollama(model=self.model_type, callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
+
+        # Define the Bakllava chain with image resizing and prompt functions
+        self.chain = (
+                {
+                    "context": multi_modal_vectorstore.as_retriever | RunnableLambda(get_resized_images),
+                    "question": RunnablePassthrough(),
+                }
+                | RunnableLambda(img_prompt_func)
+                | self.llm
+                | StrOutputParser()
+        )
+
+    def _init_gpt4_vision_chain(self, data_path):
+        """
+        Initialize the GPT-4 Vision chain.
+
+        Args:
+            data_path (str): The path to the data directory.
+        """
+        # Initialize multi-modal vector store with OpenCLIP embeddings
+        multi_modal_vectorstore = openclip_embeddings(data_path)
+
+        # Initialize GPT-4 Vision model
+        model = ChatOpenAI(temperature=0, model="gpt-4-vision-preview", max_tokens=1024)
+
+        # Define the GPT-4 Vision chain with image resizing and prompt functions
+        self.chain = (
+                {
+                    "context": multi_modal_vectorstore.as_retriever | RunnableLambda(get_resized_images),
+                    "question": RunnablePassthrough(),
+                }
+                | RunnableLambda(img_prompt_func)
+                | model
+                | StrOutputParser()
+        )
 
     def query_inferences(self, query_input):
         """
         Perform inference based on the query input and the model type.
+
+        Args:
+            query_input (str): The query input for inference.
         """
-        if self.model_type == "react_agent" or self.model_type == "mixtral_agent":
+        if self.model_type in ["react_agent", "mixtral_agent"]:
+            # Invoke the chain with the query input for ReAct and Mixtral agents
             self.result = self.chain.invoke({"input": query_input, "chat_history": self.chat_history},
                                             include_run_info=True)
             self.results = self.result["output"]
             self.chat_history.append((query_input, self.results))
-        elif self.model_type == "gpt-4" or "claude":
+
+        elif self.model_type in ["gpt-4", "claude"]:
+            # Perform inference with the query input for GPT-4 and Claude models
             self.result = self.chain({"question": query_input, "chat_history": self.chat_history},
                                      include_run_info=True)
             self.results = self.result["answer"]
             self.result["output"] = self.results
             self.chat_history.append((query_input, self.results))
+
         elif self.model_type == "gpt-4o":
-            self.result = self.chain({"input": query_input, "chat_history": self.chat_history})
-            self.results = self.result["result"]
+            # Perform inference with the query input for GPT-4o model
+            self.result = self.chain({"question": query_input, "chat_history": self.chat_history})
+            self.results = self.result["answer"]
             self.chat_history.append((query_input, self.results))
-        elif self.model_type == "mistral" or self.model_type == "llama-7b" or self.model_type == "llama3:70b" or self.model_type == "gemma" or self.model_type == "mixtral" or self.model_type == "command-r":
+
+        elif self.model_type in ["mistral", "llama:7b", "llama3:70b", "gemma", "mixtral", "command-r"]:
+            # Run the chain with the query input for Mistral, Llama, Gemma, and Mixtral models
             self.results = self.chain.run({"question": query_input})
             self.chat_history.append((query_input, self.results))
-        elif self.model_type == "gpt-4-vision" or self.model_type == "bakllava":
+
+        elif self.model_type in ["gpt-4-vision", "bakllava"]:
+            # Invoke the chain with the query input for GPT-4 Vision and Bakllava models
             self.results = self.chain.invoke({"question": query_input})
-        elif self.model_type == "agentic_rag" or self.model_type == "adaptive_rag" or self.model_type == "code_assistant" or self.model_type == "self_rag":
+
+        elif self.model_type in ["agentic_rag", "adaptive_rag", "code_assistant", "self_rag", "crag"]:
+            # Invoke the chain with the query input for AgenticRAG, AdaptiveRAG, CodeAssistant, SelfRAG, and CRAG models
             self.results = self.chain.invoke(query_input)
+
+        # Print and return the results
         print(self.results)
         return self.results, self.result
 
@@ -373,16 +477,19 @@ class LangchainModel:
 def parse_arguments():
     """
     Parse command line arguments.
+
+    Returns:
+        tuple: A tuple containing the directory, model type, and file formats.
     """
-    parser = argparse.ArgumentParser(description='Langchain Model with different model types.')
+    parser = argparse.ArgumentParser(description='Langchain Models with different LLM.')
     parser.add_argument('--directory', default='./visa_data', help='Ingesting files Directory')
     parser.add_argument('--model_type',
-                        choices=['react_agent', 'gpt-4', 'gpt-4o', 'gpt-4-vision', 'mistral', "llama3-70b", "llama:7b",
-                                 "gemma",
-                                 "mixtral", "self_rag", "bakllava", "mixtral_agent", "command-r", "agentic_rag",
+                        choices=['react_agent', 'gpt-4', 'gpt-4o', 'gpt-4-vision', 'mistral', "llama3:70b",
+                                 "llama:7b", "gemma", "crag", "mixtral", "self_rag", "bakllava", "mixtral_agent",
+                                 "command-r", "agentic_rag",
                                  "adaptive_rag", "claude", "code_assistant"],
-                        default="gpt-4o", help='Model type for processing')
-    parser.add_argument('--file_formats', nargs='+', default=['pdf'],
+                        default="code_assistant", help='Model type for processing')
+    parser.add_argument('--file_formats', nargs='+', default=['txt'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
     return args.directory, args.model_type, args.file_formats
@@ -393,6 +500,7 @@ def main():
     Main function to run Langchain Model.
     """
     directory, model_type, file_formats = parse_arguments()
+    # Langchain model init
     llm = LangchainModel(llm_model=model_type)
     llm.model_chain_init(directory, data_types=file_formats)
     while True:
