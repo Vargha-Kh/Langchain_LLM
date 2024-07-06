@@ -9,6 +9,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
+from threading import Lock
+
+# Lock to serialize access to the SQLite connection
+sqlite_lock = Lock()
+
 
 
 class AgentState(TypedDict):
@@ -44,6 +51,7 @@ class GradeDocuments(BaseModel):
 
 class CRAG:
     def __init__(self, retriever):
+        self.memory_config = None
         self.retriever = retriever
         self.web_search_tool = TavilySearchResults(k=3)
         self.question_rewriter = None
@@ -270,11 +278,16 @@ class CRAG:
         workflow.add_edge("generate", END)
 
         # Compile
-        self.app = workflow.compile()
+        conn = sqlite3.connect("checkpoints.sqlite")
+        memory = SqliteSaver(conn)
+        self.app = workflow.compile(checkpointer=memory)
+        self.memory_config = {"configurable": {'thread_id': '1'}}
+        self.app.get_state(self.memory_config)
+
 
     def invoke(self, input_query):
         inputs = {"question": input_query}
-        for output in self.app.stream(inputs):
+        for output in self.app.stream(inputs, self.memory_config):
             for key, value in output.items():
                 # Node
                 print(f"Node '{key}':")

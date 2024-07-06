@@ -14,6 +14,12 @@ from langgraph.prebuilt import ToolInvocation, ToolExecutor, ToolNode, tools_con
 from langchain_core.messages import BaseMessage
 from typing import Annotated, Sequence, TypedDict, List, Literal
 import operator
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
+from threading import Lock
+
+# Lock to serialize access to the SQLite connection
+sqlite_lock = Lock()
 
 
 class AgentState(TypedDict):
@@ -36,8 +42,9 @@ class GraphState(TypedDict):
 
 class AgenticRAG:
     def __init__(self, retriever_tool):
-        self.app = None
         self.retriever_tool = retriever_tool
+        self.app = None
+        self.memory_config = None
         self.tools = [self.retriever_tool]
         self.tool_executor = ToolExecutor(self.tools)
 
@@ -280,7 +287,11 @@ class AgenticRAG:
         workflow.add_edge("rewrite", "agent")
 
         # Compile
-        self.app = workflow.compile()
+        conn = sqlite3.connect("checkpoints.sqlite")
+        memory = SqliteSaver(conn)
+        self.app = workflow.compile(checkpointer=memory)
+        self.memory_config = {"configurable": {'thread_id': '1'}}
+        self.app.get_state(self.memory_config)
 
     def invoke(self, input_query):
         output_response = ""
@@ -292,7 +303,7 @@ class AgenticRAG:
                 )
             ]
         }
-        for output in self.app.stream(inputs):
+        for output in self.app.stream(inputs, self.memory_config):
             for key, value in output.items():
                 pprint.pprint(f"Output from node '{key}':")
                 pprint.pprint("---")

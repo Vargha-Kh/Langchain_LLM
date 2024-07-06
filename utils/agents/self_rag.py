@@ -9,6 +9,12 @@ from langgraph.graph import END, StateGraph
 from langchain_core.messages import BaseMessage
 from typing import Annotated, Sequence, TypedDict, List, Literal
 import operator
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
+from threading import Lock
+
+# Lock to serialize access to the SQLite connection
+sqlite_lock = Lock()
 
 
 class AgentState(TypedDict):
@@ -57,6 +63,7 @@ class SelfRAG:
     def __init__(self, retriever):
         self.app = None
         self.retriever = retriever
+        self.memory_config = None
         llm = ChatOpenAI(model="gpt-4-0125-preview", temperature=0, streaming=True)
 
         ### Retrieval Grader
@@ -320,13 +327,19 @@ class SelfRAG:
             },
         )
         # Compile
-        self.app = workflow.compile()
+        conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
+        memory = SqliteSaver(conn)
+        self.app = workflow.compile(checkpointer=memory)
+        self.memory_config = {"configurable": {'thread_id': '1'}}
+        self.app.get_state(self.memory_config)
+
+        # self.app.get_state(config)
 
     def invoke(self, input_query):
         inputs = {
             "question": input_query
         }
-        for output in self.app.stream(inputs):
+        for output in self.app.stream(inputs, self.memory_config):
             for key, value in output.items():
                 # Node
                 print(f"Node '{key}':")

@@ -9,6 +9,12 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolInvocation, ToolExecutor, create_agent_executor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.pydantic_v1 import BaseModel, Field, ValidationError
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
+from threading import Lock
+
+# Lock to serialize access to the SQLite connection
+sqlite_lock = Lock()
 
 
 class PlanExecute(TypedDict):
@@ -143,10 +149,14 @@ class PlannerAgent:
             },
         )
         # This compiles it into a LangChain Runnable,
-        self.app = workflow.compile()
+        conn = sqlite3.connect("checkpoints.sqlite")
+        memory = SqliteSaver(conn)
+        self.app = workflow.compile(checkpointer=memory)
+        self.memory_config = {"configurable": {'thread_id': '1'}}
+        self.app.get_state(self.memory_config)
 
     def invoke(self, input_query):
-        config = {"recursion_limit": 50}
+        config = {"recursion_limit": 50, "configurable": {'thread_id': '1'}}
         inputs = {"input": input_query}
         # event = self.app.stream(
         #     [HumanMessage(content=inputs)], config=config
