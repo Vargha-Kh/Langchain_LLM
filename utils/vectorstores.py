@@ -151,7 +151,7 @@ def opensearch_embeddings(data_path, data_types, embedding_function, create_db):
     )
 
 
-def openclip_embeddings(data_path):
+def openclip_embeddings(data_path, data_types, embedding_function, create_db):
     return Chroma(
         collection_name="multi-modal-rag",
         persist_directory=data_path,
@@ -181,3 +181,26 @@ def neo4j_embeddings(data_path, data_types, embedding_function, create_db):
             embedding_function,
             index_name=index_name,
         )
+
+# Dictionary to store all embedding functions
+embeddings_dictionary = {
+    "chroma": chroma_embeddings,
+    "milvus": milvus_embeddings,
+    "weaviate": weaviate_embeddings,
+    "qdrant": qdrant_embeddings,
+    "pinecone": pinecone_embeddings,
+    "faiss": faiss_embeddings,
+    "elasticsearch": elasticsearch_embeddings,
+    "opensearch": opensearch_embeddings,
+    "openclip": openclip_embeddings,
+    "vectara": vectara_embeddings,
+    "neo4j": neo4j_embeddings
+}
+
+# Function to call an embedding function by name
+def get_vectorstores(vectorstore_name, data_path, data_types, embedding_function, create_db):
+    """Retrieve and execute an embedding function by name."""
+    if vectorstore_name in embeddings_dictionary:
+        return embeddings_dictionary[vectorstore_name](data_path, data_types, embedding_function, create_db)
+    else:
+        return "Embedding function not found."
