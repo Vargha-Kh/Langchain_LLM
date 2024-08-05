@@ -5,27 +5,26 @@ This is a Python script that demonstrates how to use different language models f
 ![](img/2.png)
 <br>
 
-## Setup
-Before running the script, you need to set up the required credentials and install the necessary libraries.
+## Installation
 
+1. Clone the repository:
+    ```bash
+    git clone https://github.com/your-repo/langchain-model.git
+    cd langchain-model
+    ```
 
-## Install Required Libraries
-You can install the required libraries using pip. Run the following command in your terminal or command prompt:
+2. Install the required dependencies:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-```
-pip install -r requirements.txt
-```
-
-## Set Up API Keys
-The script uses the OpenAI API key for different models. You need to set these API keys as environment variables in your system. Replace OPENAI_API_KEY with your actual API keys.
-
-
-## Usage
+## Workflow
 1. File Format and Model Type:
 
     The script supports multiple file support together for loading documents: 'pdf', 'py', 'csv', and 'txt'. You can specify the desired file format and model type using command-line arguments.
 
 - --directory: Specify the directory containing the input files (e.g., 'html', 'pdf', or 'txt' files).
+- --vectorstore: Specify the vectorstore you want you use (options: qdrant, chroma, milvus, neo4j, ...)
 - --model_type: Choose the model type to use for processing (options: 'gpt-4', 'gpt-3.5', 'llama-b7' or 'mistral').
 
 2. Input Documents:
@@ -48,28 +47,86 @@ The script uses the OpenAI API key for different models. You need to set these A
 
 <br>
 
-# Streamlit Usage
+## Streamlit Usage
 For initializing Steamlit UI for running Langchain RAG:
 ```
-streamlit run main.py --directory /path/to/documents --model_type "gpt-4" --file_format 'txt' + 'csv'
+streamlit run main.py --directory /path/to/documents --model_type "gpt-4" --vectorstore "milvus" --file_format ['txt', 'csv']
 ```
 
 <br>
 
-# Bash Examples
-## Example 1: Code Review with OpenAI GPT
-```
-python langchain_llm.py --directory /path/to/documents --model_type "gpt-4" --file_format 'txt' + 'py'
-```
 
-## Example 2: Document Retrieval with Mistral
-```
-python langchain_llm.py --directory /path/to/documents --model_type "mistral" --file_format 'txt' + 'pdf'
-```
+## Usage
 
-## Example 3: Question-Answering with Google's Gemma
-```
-python langchain_llm.py --directory /path/to/documents --model_type "gemma" --file_format 'txt' + 'pdf' + 'web'
+To run the Langchain Model:
+
+1. Set up your environment by configuring the necessary API keys in your environment variables.
+
+2. Run the main script:
+    ```bash
+    python rags.py --directory <data-directory> --model_type <model-type> --file_formats <file-formats>
+    ```
+
+### Command Line Arguments
+
+- `--directory`: Path to the data directory for ingesting files (default: `./pdf_data`).
+
+- `--model_type`: Type of language model to use. Options include:
+  - `react_agent`
+  - `gpt-4o`
+  - `gpt-4-vision`
+  - `llama3:70b`
+  - `agentic_rag`
+  - `adaptive_rag`
+  - `claude`
+  - `....`
+
+- `--vectorstore`: Choosing the vectorstore for embedding the data:
+  - `chroma`
+  - `milvus`
+  - `weaviate`
+  - `qdrant`
+  - `pinecone`
+  - `faiss`
+  - `elasticsearch`
+  - `opensearch`
+  - `openclip`
+  - `vectara`
+  - `neo4j`
+
+- `--file_formats`: List of file formats for loading documents (default: `['txt', 'pdf']`).
+
+<br>
+
+## LangchainModel Class
+
+### Methods
+
+You can use the models and create instances from the rags.py code with specifying each modules.
+
+### Modules
+This repository supports various language models, vector stores, agent architectures, and tools:
+
+- Language Models: Use different LLMs such as GPT, Claude, LLaMA, and more.
+- Vector Stores: Integration with multiple vector stores including Qdrant, Milvus, Chroma, ElasticSearch, Neo4j Embeddings, and more.
+- Agent Architectures: Leverage agent architectures like AgenticRAG, AdaptiveRAG, SelfRAG, Reflexion, PlannerAgent.
+- Tools: Utilize a range of tools such as Google Search, Tavil Search, Bing Search, Retrieval tools, Huggingface tools, Python REPL, and more.
+
+
+### Example
+
+```python
+from rags import LangchainModel
+
+# Initialize the LangchainModel with a specific model type
+model = LangchainModel(llm_model="gpt-4", vectorstore="qdrant")
+
+# Initialize the model chain
+model.model_chain_init(data_path="./data", data_types=["txt"])
+
+# Query the model
+results, result = model.query_inferences("What is the capital of France?")
+print(results)
 ```
 
 <br>
