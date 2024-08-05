@@ -1,18 +1,17 @@
 import argparse
 import os.path
 import warnings
-from langchain.agents import create_react_agent, create_self_ask_with_search_agent
+
+from elasticsearch import Elasticsearch
+from langchain.agents import create_react_agent
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
-from langchain.chains import ConversationalRetrievalChain, LLMChain, RetrievalQA, RetrievalQAWithSourcesChain
-from langchain.chains.combine_documents.map_rerank import MapRerankDocumentsChain
+from langchain.chains import ConversationalRetrievalChain, LLMChain, RetrievalQAWithSourcesChain
 from langchain.chains.combine_documents.refine import RefineDocumentsChain
 from langchain.memory import (
     ConversationBufferMemory,
     ReadOnlySharedMemory
 )
-from langchain.output_parsers import RegexParser
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.prompts import PromptTemplate
 from langchain_anthropic import ChatAnthropic
 from langchain_community.chat_models import ChatOllama
@@ -21,14 +20,9 @@ from langchain_community.llms import Ollama, OpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAI, OpenAIEmbeddings
-from langchain_voyageai import VoyageAIEmbeddings
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-from langchain_elasticsearch import ElasticsearchEmbeddings
 from utils import get_resized_images, img_prompt_func, AgenticRAG, AdaptiveRAG, CRAG, CodeAssistant, \
-    get_prompt, SelfRAG, chroma_embeddings, milvus_embeddings, pinecone_embeddings, openclip_embeddings, \
-    faiss_embeddings, qdrant_embeddings, elasticsearch_embeddings, vectara_embeddings, create_retriever_tool
+    get_prompt, SelfRAG, get_vectorstores
 from utils.tools import *
-from elasticsearch import Elasticsearch
 
 warnings.filterwarnings("ignore")
 
@@ -41,7 +35,7 @@ class LangchainModel:
     Langchain Model class to handle different types of language models.
     """
 
-    def __init__(self, llm_model):
+    def __init__(self, llm_model, vectorstore_name):
         """
         Initialize the LangchainModel class with the specified LLM model type.
 
@@ -59,7 +53,8 @@ class LangchainModel:
         self.result = None
         self.results = None
         self.chat_history = []
-        self.create_db = True
+        self.vectorstore_name = vectorstore_name
+        self.create_db = False
 
     def model_chain_init(self, data_path, data_types):
         """
@@ -89,7 +84,7 @@ class LangchainModel:
             self._init_claude_chain(data_path, data_types)
         elif self.model_type == "mixtral_agent":
             self._init_mixtral_agent_chain(data_path, data_types)
-        elif self.model_type in ["mistral", "llama:7b", "llama3:70b", "gemma", "mixtral", "command-r"]:
+        elif self.model_type in ["mistral", "llama:7b", "llama3:70b", "gemma", "mixtral", "command-r", "llama3:8b"]:
             self.ollama_chain_init(data_path, data_types)
         elif self.model_type == "bakllava":
             self._init_bakllava_chain(data_path)
@@ -104,7 +99,8 @@ class LangchainModel:
             data_path (str): The path to the data directory.
             data_types (list): The list of data types to process.
         """
-        vector_store = qdrant_embeddings(data_path, data_types, OllamaEmbeddings(model=self.model_type), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types,
+                                        OllamaEmbeddings(model=self.model_type), self.create_db)
 
         # Initialize the LLM
         self.llm = ChatOllama(model=self.model_type, streaming=True,
@@ -136,10 +132,11 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = milvus_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Create a retriever tool for the agent
-        retriever_tool = create_retriever_tool(vector_db.as_retriever(), f"{os.path.basename(data_path)}",
+        retriever_tool = create_retriever_tool(vector_store.as_retriever(), f"{os.path.basename(data_path)}",
                                                f"Searches and returns answers from {os.path.basename(data_path)} document.")
 
         # Initialize AgenticRAG chain with the retriever tool
@@ -155,10 +152,11 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Initialize AdaptiveRAG chain with the retriever tool
-        self.chain = AdaptiveRAG(vector_db.as_retriever())
+        self.chain = AdaptiveRAG(vector_store.as_retriever())
         self.chain.create_graph()
 
     def _init_crag_chain(self, data_path, data_types):
@@ -170,10 +168,11 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Initialize CRAG chain with the retriever tool
-        self.chain = CRAG(vector_db.as_retriever())
+        self.chain = CRAG(vector_store.as_retriever())
         self.chain.create_graph()
 
     def _init_self_rag_chain(self, data_path, data_types):
@@ -185,10 +184,11 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Initialize SelfRAG chain with the retriever tool
-        self.chain = SelfRAG(vector_db.as_retriever())
+        self.chain = SelfRAG(vector_store.as_retriever())
         self.chain.create_graph()
 
     def _init_code_assistant_chain(self, data_path, data_types):
@@ -215,7 +215,8 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = chroma_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Initialize conversation memory buffer
         conv_memory = ConversationBufferMemory(memory_key="chat_history", input_key="input")
@@ -235,8 +236,8 @@ class LangchainModel:
 
         # Create search and retrieval tools
         search_tool = create_search_tool("tavily")
-        qa_retrieval_tool = retrieval_qa_tool(os.path.basename(data_path), vector_db, self.llm)
-        retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
+        qa_retrieval_tool = retrieval_qa_tool(os.path.basename(data_path), vector_store, self.llm)
+        retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_store)
 
         # Combine all tools for the agent
         tools = [retriever_tool, search_tool, qa_retrieval_tool, summary_memory_tool]
@@ -258,7 +259,8 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = qdrant_embeddings(data_path, data_types, FastEmbedEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Initialize conversation memory buffer
         memory = ConversationBufferMemory(memory_key="chat_history", return_messages=False)
@@ -270,7 +272,7 @@ class LangchainModel:
         # Create the conversational retrieval chain with GPT-4
         self.chain = ConversationalRetrievalChain.from_llm(
             ChatOpenAI(temperature=self.temperature, streaming=True, model_name="gpt-4-turbo"),
-            retriever=vector_db.as_retriever(),
+            retriever=vector_store.as_retriever(),
             return_source_documents=False,
             memory=memory,
             combine_docs_chain_kwargs={"prompt": prompt_template},
@@ -287,7 +289,8 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = elasticsearch_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
 
         # Define the prompt template
         prompt = PromptTemplate(template=get_prompt("visa"), input_variables=["context", "question"])
@@ -311,7 +314,7 @@ class LangchainModel:
         self.chain = RetrievalQAWithSourcesChain(
             combine_documents_chain=combine_docs_chain,
             memory=memory,
-            retriever=vector_db.as_retriever(),
+            retriever=vector_store.as_retriever(),
             return_source_documents=True,
             verbose=True
         )
@@ -325,8 +328,8 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = milvus_embeddings(data_path, data_types, OpenAIEmbeddings(), self.create_db)
-
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OpenAIEmbeddings(),
+                                        self.create_db)
         # Define the LLM for Claude
         llm = ChatAnthropic(model="claude-3-opus-20240229", streaming=True)
 
@@ -340,7 +343,7 @@ class LangchainModel:
         # Create the conversational retrieval chain with Claude
         self.chain = ConversationalRetrievalChain.from_llm(
             llm,
-            retriever=vector_db.as_retriever(),
+            retriever=vector_store.as_retriever(),
             return_source_documents=False,
             memory=memory,
             combine_docs_chain_kwargs={"prompt": prompt_template},
@@ -357,7 +360,8 @@ class LangchainModel:
             data_types (list): The list of data types to process.
         """
         # Initialize vector database with embeddings
-        vector_db = chroma_embeddings(data_path, data_types, OllamaEmbeddings(model="mixtral"), self.create_db)
+        vector_store = get_vectorstores(self.vectorstore_name, data_path, data_types, OllamaEmbeddings(model="mixtral"),
+                                        self.create_db)
 
         # Initialize Ollama LLM for Mixtral
         self.llm = ChatOllama(model='mixtral', streaming=True,
@@ -368,7 +372,7 @@ class LangchainModel:
 
         # Create search tool and retriever tool
         search_tool = create_search_tool(engine="arxiv")
-        retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_db)
+        retriever_tool = vectorstore_retriever_tool(os.path.basename(data_path), vector_store)
 
         # Combine tools for the agent
         tools = [retriever_tool, search_tool]
@@ -388,7 +392,8 @@ class LangchainModel:
             data_path (str): The path to the data directory.
         """
         # Initialize multi-modal vector store with OpenCLIP embeddings
-        multi_modal_vectorstore = openclip_embeddings(data_path)
+        multi_modal_vectorstore = get_vectorstores(self.vectorstore_name, data_path, "image", OpenAIEmbeddings(),
+                                                   self.create_db)
 
         # Initialize the LLM with streaming callback
         self.llm = Ollama(model=self.model_type, callback_manager=CallbackManager([StreamingStdOutCallbackHandler()]))
@@ -412,7 +417,8 @@ class LangchainModel:
             data_path (str): The path to the data directory.
         """
         # Initialize multi-modal vector store with OpenCLIP embeddings
-        multi_modal_vectorstore = openclip_embeddings(data_path)
+        multi_modal_vectorstore = get_vectorstores(self.vectorstore_name, data_path, "image", OpenAIEmbeddings(),
+                                                   self.create_db)
 
         # Initialize GPT-4 Vision model
         model = ChatOpenAI(temperature=0, model="gpt-4-vision-preview", max_tokens=1024)
@@ -456,7 +462,7 @@ class LangchainModel:
             self.results = self.result["answer"]
             self.chat_history.append((query_input, self.results))
 
-        elif self.model_type in ["mistral", "llama:7b", "llama3:70b", "gemma", "mixtral", "command-r"]:
+        elif self.model_type in ["mistral", "llama:7b", "llama3:70b", "gemma", "mixtral", "command-r", "llama3:8b"]:
             # Run the chain with the query input for Mistral, Llama, Gemma, and Mixtral models
             self.results = self.chain.run({"question": query_input})
             self.chat_history.append((query_input, self.results))
@@ -486,22 +492,33 @@ def parse_arguments():
     parser.add_argument('--model_type',
                         choices=['react_agent', 'gpt-4', 'gpt-4o', 'gpt-4-vision', 'mistral', "llama3:70b",
                                  "llama:7b", "gemma", "crag", "mixtral", "self_rag", "bakllava", "mixtral_agent",
-                                 "command-r", "agentic_rag",
+                                 "command-r", "agentic_rag", "llama3:8b",
                                  "adaptive_rag", "claude", "code_assistant"],
-                        default="code_assistant", help='Model type for processing')
+                        default="mistral", help='Model type for processing')
+    parser.add_argument('--vectorstore', default="chroma", help='Embeddings Vectorstore', choices=["chroma",
+                                                                                                   "milvus",
+                                                                                                   "weaviate",
+                                                                                                   "qdrant",
+                                                                                                   "pinecone",
+                                                                                                   "faiss",
+                                                                                                   "elasticsearch",
+                                                                                                   "opensearch",
+                                                                                                   "openclip",
+                                                                                                   "vectara",
+                                                                                                   "neo4j"])
     parser.add_argument('--file_formats', nargs='+', default=['txt'],
                         help='List of file formats for loading documents')
     args = parser.parse_args()
-    return args.directory, args.model_type, args.file_formats
+    return args.directory, args.model_type, args.vectorstore, args.file_formats
 
 
 def main():
     """
     Main function to run Langchain Model.
     """
-    directory, model_type, file_formats = parse_arguments()
+    directory, model_type, vectorstore, file_formats = parse_arguments()
     # Langchain model init
-    llm = LangchainModel(llm_model=model_type)
+    llm = LangchainModel(llm_model=model_type, vectorstore_name=vectorstore)
     llm.model_chain_init(directory, data_types=file_formats)
     while True:
         query = input("Please ask your question! ")
