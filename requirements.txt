@@ -8,9 +8,6 @@ typing_extensions
 openapi-schema-pydantic==1.2.4
 pydantic==1.10.8
 python-telegram-bot
-langchain_community
-langchain-experimental 
-langchain_openai 
 langchainhub
 streamlit
 open_clip_torch
@@ -20,3 +17,12 @@ pymilvus
 langchain-weaviate
 langchain-chroma
 langchain-anthropic
+neo4j
+ollama
+langchain-community
+langchain-elasticsearch
+langchain-experimental
+langchain-openai      
+langchain-pinecone       
+langchain-text-splitters    
+langchainhub        
