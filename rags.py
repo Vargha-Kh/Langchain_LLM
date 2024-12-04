@@ -578,7 +578,7 @@ class LangchainModel:
 
         # Print and return the results
         print(self.results)
-        return self.results, self.result
+        return self.results
 
 
 def parse_arguments():
