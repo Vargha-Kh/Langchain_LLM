@@ -14,7 +14,8 @@ retrieval_prompt = """
              {chat_history}
 
              {context}
-             Question: {question}
+             
+             Question: {input}
              Helpful Answer:
              """
 
@@ -24,7 +25,7 @@ conversation_prompt = """You are an assistant for question-answering tasks, Use 
            {history}
            Current conversation:
            {chat_history_lines}
-           Human: {question}
+           Human: {input}
            AI:"""
 
 summary_prompt = """ This is a conversation between a human and a bot:
@@ -40,10 +41,25 @@ visa_prompt = """ You are an AI assistant specialized in Australia visa and immi
         {context}
         
         Question:
-        {question}
+        {input}
         
         Helpful Answer:
         """
+
+multi_query = """You are an AI language model assistant. Your task is to generate five 
+            different versions of the given user question to retrieve relevant documents from a vector 
+            database. By generating multiple perspectives on the user question, your goal is to help
+            the user overcome some of the limitations of the distance-based similarity search. 
+            Provide these alternative questions separated by newlines.
+            Original question: {input}"""
+
+condense_question_system_template = (
+    "Given a chat history and the latest user question "
+    "which might reference context in the chat history, "
+    "formulate a standalone question which can be understood "
+    "without the chat history. Do NOT answer the question, "
+    "just reformulate it if needed and otherwise return it as is."
+)
 
 prompts_dictionary = {
     "openai_tools": openai_tools_prompt,
@@ -52,6 +68,8 @@ prompts_dictionary = {
     "rag": rag_prompt,
     "ask_search": ask_search_prompt,
     "react": react_prompt,
+    "multi_query": multi_query,
+    "condense_question": condense_question_system_template,
     "conversation": conversation_prompt,
     "summary": summary_prompt,
     "retrieval": retrieval_prompt,

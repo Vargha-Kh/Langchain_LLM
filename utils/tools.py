@@ -3,8 +3,8 @@ from langchain_experimental.tools import PythonREPLTool
 from langchain.tools.retriever import create_retriever_tool
 from langchain_community.utilities import GoogleSearchAPIWrapper, ArxivAPIWrapper, BingSearchAPIWrapper, \
     WikipediaAPIWrapper
-from langchain.agents import AgentExecutor, create_openai_tools_agent, create_openai_functions_agent, initialize_agent, \
-    Tool, ZeroShotAgent, load_huggingface_tool
+from langchain.agents import Tool, ZeroShotAgent
+from langchain_community.agent_toolkits.load_tools import load_huggingface_tool
 from langchain_community.tools import DuckDuckGoSearchResults, DuckDuckGoSearchRun
 from langchain.chains import ConversationalRetrievalChain, RetrievalQA
 from langchain_community.tools import WikipediaQueryRun
