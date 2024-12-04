@@ -9,8 +9,8 @@ This is a Python script that demonstrates how to use different language models f
 
 1. Clone the repository:
     ```bash
-    git clone https://github.com/your-repo/langchain-model.git
-    cd langchain-model
+    git clone https://github.com/Vargha-Kh/Langchain-RAG-DevelopmentKit
+    cd Langchain-RAG-DevelopmentKit
     ```
 
 2. Install the required dependencies:
